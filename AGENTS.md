@@ -4,7 +4,7 @@
 **Purpose:**
 Enable users to control web browsing via natural-language voice commands. The system interprets speech, reasons about page structure, and performs DOM-level actions entirely inside the browser (Observer + Execution Layer) while reasoning and orchestration occur in cloud agents (Interpreter + Navigator).
 
-### **🎯 MVP Use Case**
+### **MVP Use Case**
 
 User says: “Show me the cheapest flights from Istanbul to London on the 21st of January.”
 
