@@ -1,0 +1,12 @@
+version: "1.0"
+agents:
+  interpreter:
+    dockerfile: agents/Dockerfile.interpreter
+    env:
+      ASI_CLOUD_API_KEY: ${ASI_CLOUD_API_KEY}
+      INTERPRETER_SEED: ${INTERPRETER_SEED:-interpreter-seed}
+  navigator:
+    dockerfile: agents/Dockerfile.navigator
+    env:
+      ASI_CLOUD_API_KEY: ${ASI_CLOUD_API_KEY}
+      NAVIGATOR_SEED: ${NAVIGATOR_SEED:-navigator-seed}
