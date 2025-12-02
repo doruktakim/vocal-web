@@ -239,6 +239,36 @@ def score_dom_element(el: DOMElement, keywords: Sequence[str]) -> float:
     return min(1.0, base + (el.score_hint or 0.0))
 
 
+def recency_score(text: str) -> float:
+    """Approximate recency from phrases like '3 hours ago', '2 days ago', '1 year ago'."""
+    if not text:
+        return 0.0
+    lower = text.lower()
+    if "just now" in lower or "now" in lower:
+        return 1.0
+    match = re.search(r"(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago", lower)
+    if not match:
+        # Common YouTube phrasing: "Streamed X days ago"
+        match = re.search(r"streamed\s+(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago", lower)
+    if not match:
+        return 0.0
+    value = int(match.group(1))
+    unit = match.group(2)
+    # Roughly convert to days to rank freshness.
+    unit_to_days = {
+        "second": 1 / (60 * 60 * 24),
+        "minute": 1 / (60 * 24),
+        "hour": 1 / 24,
+        "day": 1,
+        "week": 7,
+        "month": 30,
+        "year": 365,
+    }
+    days = value * unit_to_days.get(unit, 999)
+    # Freshness score: recent items near 1.0, older items decay.
+    return max(0.0, min(1.0, 1.0 / (1.0 + days)))
+
+
 def map_site_to_url(site: str) -> Optional[str]:
     normalized = site.lower().strip()
     mapping = {
@@ -466,6 +496,30 @@ def pick_nth_clickable_element(
     return selected[0], selected[1]
 
 
+def pick_latest_clickable_element(
+    dom_map: DOMMap, keywords: Optional[Sequence[str]] = None
+) -> Tuple[Optional[DOMElement], float]:
+    """Pick the clickable element that appears most recent based on 'X <unit> ago' text."""
+    allowed_tags = {"a", "button", "div", "span", "li"}
+    allowed_roles = {"link", "button", "option", "listitem", "menuitem"}
+    best = None
+    best_score = 0.0
+    for el in dom_map.elements:
+        if not el.visible or not el.enabled:
+            continue
+        normalized_role = (el.role or "").lower()
+        if el.tag not in allowed_tags and normalized_role not in allowed_roles:
+            continue
+        combined = combine_element_text(el)
+        freshness = recency_score(combined)
+        relevance = keyword_score(combined, keywords) if keywords else 0.4
+        score = 0.7 * freshness + 0.3 * relevance
+        if score > best_score:
+            best = el
+            best_score = score
+    return best, best_score
+
+
 def build_execution_plan_for_navigation(
     action_plan: ActionPlan,
 ) -> Tuple[Optional[ExecutionPlan], Optional[ClarificationRequest]]:
@@ -537,6 +591,67 @@ def build_execution_plan_for_search_content(
         # Navigate first if we are not on the target site.
         return build_execution_plan_for_navigation(action_plan)
     site_hint = (action_plan.entities or {}).get("site") or (action_plan.target or "")
+
+    entities = action_plan.entities or {}
+    wants_latest = bool(entities.get("latest"))
+    requested_position = entities.get("position")
+    result_keywords = [query, site_hint, action_plan.target or ""]
+
+    # If we are already on a results page (e.g., after a previous search) and the user
+    # wants the latest result, try picking the freshest clickable item.
+    if wants_latest:
+        result_clickable, result_score = pick_latest_clickable_element(dom_map, result_keywords)
+        if result_clickable and result_score >= 0.45:
+            steps: List[ExecutionStep] = [
+                ExecutionStep(
+                    step_id="s_scroll_result",
+                    action_type="scroll",
+                    element_id=None,
+                    value="down",
+                    timeout_ms=3000,
+                    retries=0,
+                    confidence=0.6,
+                ),
+                ExecutionStep(
+                    step_id="s_click_result",
+                    action_type="click",
+                    element_id=result_clickable.element_id,
+                    timeout_ms=4000,
+                    retries=0,
+                    confidence=max(0.55, result_score),
+                ),
+            ]
+            plan = ExecutionPlan(id=make_uuid(), trace_id=action_plan.trace_id, steps=steps)
+            return plan, None
+
+    # If a specific position is requested, try to pick that nth clickable.
+    if requested_position:
+        result_clickable, result_score = pick_nth_clickable_element(
+            dom_map, requested_position, result_keywords
+        )
+        if result_clickable and result_score >= 0.5:
+            steps: List[ExecutionStep] = [
+                ExecutionStep(
+                    step_id="s_scroll_result",
+                    action_type="scroll",
+                    element_id=None,
+                    value="down",
+                    timeout_ms=3000,
+                    retries=0,
+                    confidence=0.6,
+                ),
+                ExecutionStep(
+                    step_id="s_click_result",
+                    action_type="click",
+                    element_id=result_clickable.element_id,
+                    timeout_ms=4000,
+                    retries=0,
+                    confidence=max(0.5, result_score),
+                ),
+            ]
+            plan = ExecutionPlan(id=make_uuid(), trace_id=action_plan.trace_id, steps=steps)
+            return plan, None
+
     search_input, search_score, search_button, button_score = find_search_elements(dom_map, site_hint)
     if not search_input or search_score < 0.35:
         return None, ClarificationRequest(
