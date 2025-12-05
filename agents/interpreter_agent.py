@@ -1,12 +1,10 @@
 """Interpreter agent: transcript -> ActionPlan."""
 
 from __future__ import annotations
-
 import logging
 import os
-import re
 from typing import Union
-from urllib.parse import urlparse
+import re
 
 from uagents import Agent, Bureau, Context
 
@@ -35,68 +33,54 @@ INTERPRETER_SEED = os.getenv("INTERPRETER_SEED", "interpreter-seed")
 logger = logging.getLogger(__name__)
 
 
-def _fast_path_basic_action(
-    msg: TranscriptMessage, transcript_lower: str, entities: dict
-) -> Union[ActionPlan, None]:
-    """Handle lightweight browser commands without LLM calls."""
-    back_phrases = [
-        "go back",
-        "back to the previous page",
-        "back to previous page",
-        "previous page",
-        "back one page",
-    ]
-    if any(phrase in transcript_lower for phrase in back_phrases):
-        return ActionPlan(
-            id=make_uuid(),
-            trace_id=msg.trace_id,
-            action="history_back",
-            target="browser_history",
-            value="back",
-            entities=entities,
-            confidence=0.9,
-        )
-
-    if "scroll" in transcript_lower:
-        return ActionPlan(
-            id=make_uuid(),
-            trace_id=msg.trace_id,
-            action="scroll",
-            target="page",
-            value=entities.get("scroll_direction", "down"),
-            entities=entities,
-            confidence=0.75,
-        )
-
-    return None
-
-
 async def build_action_plan_from_transcript(
     msg: TranscriptMessage, asi_client: ASIClient
 ) -> Union[ActionPlan, ClarificationRequest]:
+    # Prefer an LLM-backed parse when available; fallback to local heuristics.
+    if asi_client.api_url and asi_client.api_key:
+        remote = await asi_client.interpret_transcript(msg.transcript, msg.metadata or {})
+        if remote:
+            logger.info("Interpreter used LLM parse (trace_id=%s)", msg.trace_id)
+            if remote.get("schema_version") == "clarification_v1":
+                return ClarificationRequest(**remote)
+            if remote.get("schema_version") == "actionplan_v1":
+                plan = ActionPlan(**remote)
+                # Augment remote plan with locally inferred entities (site/query/url) when missing,
+                # so we steer to a site-native action instead of a generic web search.
+                local_entities = extract_entities_from_transcript(msg.transcript)
+                merged = dict(plan.entities or {})
+                for key, val in (local_entities or {}).items():
+                    if key not in merged and val is not None:
+                        merged[key] = val
+                if plan.action == "search_content":
+                    if merged.get("site") and "url" not in merged:
+                        url = map_site_to_url(merged["site"])
+                        if url:
+                            merged["url"] = url
+                    if not plan.target and merged.get("site"):
+                        plan.target = merged["site"]
+                plan.entities = merged or None
+                return plan
+        else:
+            logger.info("Interpreter LLM unavailable/empty, falling back to heuristics (trace_id=%s)", msg.trace_id)
+    else:
+        logger.info("Interpreter LLM not configured, using heuristics (trace_id=%s)", msg.trace_id)
+
+    # Local fallback: broader heuristics across browsing and travel.
     transcript_lower = msg.transcript.lower()
     entities = extract_entities_from_transcript(msg.transcript)
-    site_from_transcript = "site" in entities
 
-    metadata = msg.metadata or {}
-    page_url = metadata.get("page_url") or metadata.get("pageUrl")
-    page_host = metadata.get("page_host") or metadata.get("host")
-    context_site = metadata.get("site") or page_host
-    if not context_site and page_url:
-        try:
-            context_site = urlparse(page_url).hostname
-        except Exception:
-            context_site = None
-    normalized_site = context_site.lower().replace("www.", "") if context_site else None
-
-    if normalized_site and not site_from_transcript:
-        entities["site"] = normalized_site
-    if page_url and "url" not in entities:
-        entities["url"] = page_url
-    elif normalized_site and "url" not in entities:
-        mapped_url = map_site_to_url(normalized_site)
-        if mapped_url:
-            entities["url"] = mapped_url
+    def infer_query_text() -> str:
+        if entities.get("query"):
+            return entities["query"]
+        cleaned = re.sub(
+            r"^\s*(please\s+)?(open|show me|show|play|watch|find|search(?: for)?|look up|look for)\s+",
+            "",
+            msg.transcript,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(r"\b(latest|newest|recent)\b", "", cleaned, flags=re.IGNORECASE).strip(" .,")
+        return cleaned
 
     def clarifying(question: str, reason: str):
         return ClarificationRequest(
@@ -107,45 +91,35 @@ async def build_action_plan_from_transcript(
             reason=reason,
         )
 
-    fast_path = _fast_path_basic_action(msg, transcript_lower, entities)
-    if fast_path:
-        logger.info("Interpreter used fast path for basic command (trace_id=%s)", msg.trace_id)
-        return fast_path
+    video_intent = any(word in transcript_lower for word in ["video", "videos", "watch", "play", "music", "song", "clip", "trailer", "episode"])
+    flight_intent = any(word in transcript_lower for word in ["flight", "flights", "airfare", "plane ticket"])
+    search_signal = any(word in transcript_lower for word in ["search", "find", "look up", "look for", "watch", "play", "show me"])
+    query_text = infer_query_text() if (video_intent or search_signal or entities.get("query")) else None
+    if query_text:
+        entities["query"] = query_text
 
-    llm_clarification: Union[ClarificationRequest, None] = None
-    # Prefer an LLM-backed parse when available; fallback to local heuristics.
-    if asi_client.api_url and asi_client.api_key:
-        remote = await asi_client.interpret_transcript(msg.transcript, msg.metadata or {})
-        if remote:
-            logger.info("Interpreter used LLM parse (trace_id=%s)", msg.trace_id)
-            if remote.get("schema_version") == "clarification_v1":
-                llm_clarification = ClarificationRequest(**remote)
-            if remote.get("schema_version") == "actionplan_v1":
-                return ActionPlan(**remote)
-        else:
-            logger.info("Interpreter LLM unavailable/empty, falling back to heuristics (trace_id=%s)", msg.trace_id)
-    else:
-        logger.info("Interpreter LLM not configured, using heuristics (trace_id=%s)", msg.trace_id)
+    # Default to a sensible destination for common intents when none is specified.
+    if video_intent and not entities.get("site"):
+        entities["site"] = "youtube"
+        url = map_site_to_url("youtube")
+        if url:
+            entities["url"] = url
+    if flight_intent and not entities.get("site"):
+        entities["site"] = "google flights"
+        url = map_site_to_url("google flights")
+        if url:
+            entities["url"] = url
 
-    # Local fallback: broader heuristics across browsing and travel.
-
-    section_match = re.search(r"(?:open|go to|show|take me to)\s+(?:the\s+)?([a-z0-9 &'\"-]+?)\s+section", transcript_lower)
-    common_sections = ["opinion", "sports", "world", "us", "business", "technology", "tech", "style", "politics", "arts"]
-    section_name = section_match.group(1).strip() if section_match else None
-    if not section_name and "open" in transcript_lower:
-        for sec in common_sections:
-            if re.search(rf"\b{sec}\b", transcript_lower):
-                section_name = sec
-                break
-    if section_name and (normalized_site or site_from_transcript):
+    # Scroll intent
+    if "scroll" in transcript_lower:
         return ActionPlan(
             id=make_uuid(),
             trace_id=msg.trace_id,
-            action="click",
-            target=f"{section_name} section",
-            value=None,
+            action="scroll",
+            target="page",
+            value=entities.get("scroll_direction", "down"),
             entities=entities,
-            confidence=0.72 if (normalized_site or site_from_transcript) else 0.65,
+            confidence=0.7,
         )
 
     # Click nth item intent
@@ -158,47 +132,6 @@ async def build_action_plan_from_transcript(
             value=str(entities["position"]),
             entities=entities,
             confidence=0.75,
-        )
-
-    # Explicit navigation intent
-    if (
-        "open" in transcript_lower or "go to" in transcript_lower or "navigate" in transcript_lower
-    ) and (site_from_transcript or not normalized_site) and (entities.get("site") or entities.get("url")):
-        return ActionPlan(
-            id=make_uuid(),
-            trace_id=msg.trace_id,
-            action="open_site",
-            target=entities.get("site"),
-            value=entities.get("url"),
-            entities=entities,
-            confidence=0.8,
-        )
-
-    # Content search intent (site-aware or generic)
-    if any(word in transcript_lower for word in ["search", "find", "look up", "look for", "watch", "play"]) or entities.get("query"):
-        query_text = entities.get("query") or msg.transcript
-        if not query_text:
-            return clarifying("What should I search for?", "missing_query")
-        return ActionPlan(
-            id=make_uuid(),
-            trace_id=msg.trace_id,
-            action="search_content",
-            target=entities.get("site") or "page",
-            value=query_text,
-            entities=entities,
-            confidence=0.75 if entities.get("query") else 0.6,
-        )
-
-    # Site mention without an explicit verb: default to navigation to broaden coverage.
-    if entities.get("site") or entities.get("url"):
-        return ActionPlan(
-            id=make_uuid(),
-            trace_id=msg.trace_id,
-            action="open_site",
-            target=entities.get("site"),
-            value=entities.get("url"),
-            entities=entities,
-            confidence=0.62,
         )
 
     # Travel/hotel/flight intent
@@ -214,7 +147,7 @@ async def build_action_plan_from_transcript(
             action="search_flights",
             target="flight_search_form",
             entities=entities,
-            confidence=0.85,
+            confidence=0.88,
         )
 
     if "flight" in transcript_lower or "flights" in transcript_lower:
@@ -233,6 +166,14 @@ async def build_action_plan_from_transcript(
                 options=[ClarificationOption(label=item) for item in missing],
                 reason="missing_entities",
             )
+        return ActionPlan(
+            id=make_uuid(),
+            trace_id=msg.trace_id,
+            action="search_flights",
+            target="flight_search_form",
+            entities=entities,
+            confidence=0.8,
+        )
 
     if hotel_intent and has_destination_only:
         return ActionPlan(
@@ -254,9 +195,48 @@ async def build_action_plan_from_transcript(
             confidence=0.7,
         )
 
+    # Content search intent (site-aware or generic) — prefer site-native search over generic browsing.
+    if search_signal or entities.get("query") or video_intent:
+        query_text = entities.get("query") or msg.transcript
+        if not query_text:
+            return clarifying("What should I search for?", "missing_query")
+        return ActionPlan(
+            id=make_uuid(),
+            trace_id=msg.trace_id,
+            action="search_content",
+            target=entities.get("site") or ("youtube" if video_intent else "page"),
+            value=query_text,
+            entities=entities,
+            confidence=0.8 if entities.get("site") else 0.65,
+        )
+
+    # Explicit navigation intent
+    if ("open" in transcript_lower or "go to" in transcript_lower or "navigate" in transcript_lower) and (
+        entities.get("site") or entities.get("url")
+    ):
+        return ActionPlan(
+            id=make_uuid(),
+            trace_id=msg.trace_id,
+            action="open_site",
+            target=entities.get("site"),
+            value=entities.get("url"),
+            entities=entities,
+            confidence=0.8,
+        )
+
+    # Site mention without an explicit verb: default to navigation to broaden coverage.
+    if entities.get("site") or entities.get("url"):
+        return ActionPlan(
+            id=make_uuid(),
+            trace_id=msg.trace_id,
+            action="open_site",
+            target=entities.get("site"),
+            value=entities.get("url"),
+            entities=entities,
+            confidence=0.62,
+        )
+
     # Fallback: if nothing matched, ask for clarification.
-    if llm_clarification:
-        return llm_clarification
     return clarifying("What should I do?", "ambiguous_intent")
 
 
