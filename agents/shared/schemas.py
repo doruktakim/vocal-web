@@ -175,3 +175,16 @@ class NavigationRequest(Model):
     trace_id: Optional[str] = None
     action_plan: ActionPlan
     dom_map: DOMMap
+
+
+class PipelineRequest(Model):
+    schema_version: str = "pipeline_v1"
+    id: str
+    trace_id: Optional[str] = None
+    transcript: str
+    dom_map: DOMMap
+    metadata: Optional[Dict[str, Any]] = None
+
+    @validator("metadata", pre=True, always=True)
+    def _default_metadata(cls, value):
+        return dict(value or {})
