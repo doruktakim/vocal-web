@@ -14,7 +14,11 @@ This repository implements the MVP described in `AGENTS.md`: interpreter and nav
 2. Start the HTTP API bridge: `python -m agents.api_server` (defaults to port `8081`).
    - Optional: run agents over uAgents network: `python -m agents.run_agents`.
    - Optional: mock ASI Cloud: `python dev/mocks/mock_asi.py`.
-3. Run the local harness: `python dev/harness/demo_flow.py`.
+3. Configure Google Speech-to-Text:
+   - Drop your service-account JSON somewhere outside the repo (e.g., `/Users/aliyigituzun/Desktop/VCAA Keys/gc-stt.json`).
+   - Point the agents/bridge at it with `export GOOGLE_APPLICATION_CREDENTIALS="/Users/aliyigituzun/Desktop/VCAA Keys/gc-stt.json"`.
+   - The HTTP bridge now exposes `/api/stt/transcribe`, which accepts `audio_base64`, `sample_rate_hertz`, `encoding`, and `language_code` and returns the transcript JSON.
+4. Run the local harness: `python dev/harness/demo_flow.py`.
 4. Load the `extension/` folder as an unpacked extension in Chrome. Open the popup, set API base (default `http://localhost:8081`), and click **Run Demo** with an active flight search page.
 
 ## Notes

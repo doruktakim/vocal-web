@@ -29,6 +29,20 @@ button {
   font-weight: 600;
 }
 
+#micToggle {
+  font-size: 12px;
+  background: #0b5cff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#micToggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 pre {
   background: #111;
   color: #0f0;

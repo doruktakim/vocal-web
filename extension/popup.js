@@ -2,6 +2,113 @@ const transcriptField = document.getElementById("transcript");
 const apiBaseField = document.getElementById("apiBase");
 const outputEl = document.getElementById("output");
 const runButton = document.getElementById("run");
+const micToggle = document.getElementById("micToggle");
+
+const SpeechRecognition =
+  window.SpeechRecognition || window.webkitSpeechRecognition || null;
+let recognition = null;
+let isListening = false;
+let microphonePermissionGranted = false;
+
+function updateMicButtonLabel(text) {
+  if (!SpeechRecognition) {
+    micToggle.textContent = "🎙️ Speech unavailable";
+    micToggle.disabled = true;
+    return;
+  }
+  if (text) {
+    micToggle.textContent = text;
+    return;
+  }
+  micToggle.textContent = isListening
+    ? "🔴 Listening... click to stop"
+    : "🎙️ Start listening";
+}
+
+function ensureRecognition() {
+  if (!SpeechRecognition) {
+    return null;
+  }
+  if (recognition) {
+    return recognition;
+  }
+  recognition = new SpeechRecognition();
+  recognition.lang = "en-US";
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.continuous = false;
+
+  recognition.onresult = (event) => {
+    const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+    if (transcript) {
+      transcriptField.value = transcript;
+      log(`Heard: ${transcript}`);
+    }
+  };
+  recognition.onend = () => {
+    isListening = false;
+    updateMicButtonLabel();
+  };
+  recognition.onerror = (event) => {
+    log(`Speech recognition error: ${event.error}`);
+    isListening = false;
+    updateMicButtonLabel();
+  };
+
+  return recognition;
+}
+
+async function requestMicrophoneAccess() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    log("Microphone access is unavailable in this context.");
+    return false;
+  }
+  if (microphonePermissionGranted) {
+    return true;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((track) => track.stop());
+    microphonePermissionGranted = true;
+    return true;
+  } catch (err) {
+    log(`Microphone access denied: ${err.message || err}`);
+    return false;
+  }
+}
+
+async function toggleListening() {
+  if (!SpeechRecognition) {
+    log("Speech recognition is not supported in this browser.");
+    return;
+  }
+  const recognizer = ensureRecognition();
+  if (!recognizer) {
+    log("Unable to access speech recognition.");
+    return;
+  }
+  if (isListening) {
+    recognizer.stop();
+    isListening = false;
+    updateMicButtonLabel("Stopping...");
+    return;
+  }
+  const granted = await requestMicrophoneAccess();
+  if (!granted) {
+    updateMicButtonLabel();
+    return;
+  }
+  try {
+    isListening = true;
+    updateMicButtonLabel();
+    recognizer.start();
+    log("Listening...");
+  } catch (err) {
+    log(`Failed to start speech recognition: ${err.message || err}`);
+    isListening = false;
+    updateMicButtonLabel();
+  }
+}
 
 function log(msg) {
   outputEl.textContent = msg;
@@ -92,4 +199,9 @@ runButton.addEventListener("click", () => {
   });
 });
 
+if (micToggle) {
+  micToggle.addEventListener("click", toggleListening);
+}
+
+updateMicButtonLabel();
 loadConfig();
