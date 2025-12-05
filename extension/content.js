@@ -200,9 +200,27 @@
   }
 
   function captureDomMap() {
-    const candidates = document.querySelectorAll(
-      "input, button, select, textarea, a, [role='button'], [role='textbox'], [role='option'], li[role='option']"
-    );
+    // Include common form controls plus grid cells (e.g., calendar dates), traversing shadow DOMs.
+    const selector =
+      "input, button, select, textarea, a, [role='button'], [role='textbox'], [role='option'], li[role='option'], [role='gridcell'], td[role='gridcell'], div[role='gridcell'], [aria-label]";
+    const candidates = [];
+    const seen = new Set();
+    const stack = [document];
+    while (stack.length) {
+      const root = stack.pop();
+      const scopeNodes = root.querySelectorAll ? Array.from(root.querySelectorAll("*")) : [];
+      scopeNodes.forEach((el) => {
+        if (el.shadowRoot) {
+          stack.push(el.shadowRoot);
+        }
+        if (el.matches && el.matches(selector)) {
+          if (!seen.has(el)) {
+            seen.add(el);
+            candidates.push(el);
+          }
+        }
+      });
+    }
     const elements = [];
     candidates.forEach((el, idx) => {
       const elementId = `el_${idx}`;
@@ -273,6 +291,24 @@
               error: "Missing navigation URL",
             });
           }
+        } catch (err) {
+          results.push({
+            step_id: step.step_id,
+            status: "error",
+            error: String(err),
+          });
+        }
+        continue;
+      }
+      if (step.action_type === "history_back") {
+        try {
+          window.history.back();
+          results.push({
+            step_id: step.step_id,
+            status: "success",
+            error: null,
+            duration_ms: Math.round(performance.now() - start),
+          });
         } catch (err) {
           results.push({
             step_id: step.step_id,
@@ -375,5 +411,18 @@
       return true;
     }
     return false;
+  });
+
+  // Debug hook: allow page context to request a DOMMap via window.postMessage.
+  window.addEventListener("message", async (event) => {
+    if (event.source !== window) return;
+    if (!event.data || event.data.type !== "vcaa-dump-dommap") return;
+    try {
+      console.debug("[VCAA] Capturing DOMMap (page request)");
+      const domMap = captureDomMap();
+      window.postMessage({ type: "vcaa-dommap", domMap }, "*");
+    } catch (err) {
+      window.postMessage({ type: "vcaa-dommap-error", error: String(err) }, "*");
+    }
   });
 })();

@@ -20,6 +20,7 @@ try:
         build_execution_plan_for_click_result,
         build_execution_plan_for_destination_search,
         build_execution_plan_for_flight_search,
+        build_execution_plan_for_history_back,
         build_execution_plan_for_navigation,
         build_execution_plan_for_scroll,
         build_execution_plan_for_search_content,
@@ -38,6 +39,7 @@ except Exception:
         build_execution_plan_for_click_result,
         build_execution_plan_for_destination_search,
         build_execution_plan_for_flight_search,
+        build_execution_plan_for_history_back,
         build_execution_plan_for_navigation,
         build_execution_plan_for_scroll,
         build_execution_plan_for_search_content,
@@ -59,6 +61,22 @@ navigator_agent = Agent(
 async def build_execution_plan(
     nav_request: NavigationRequest,
 ) -> Union[ExecutionPlan, ClarificationRequest]:
+    action = (nav_request.action_plan.action or "").lower()
+
+    # Fast-path: avoid LLM calls for lightweight browser actions.
+    if action in {"scroll", "scroll_page", "history_back", "back", "go_back"}:
+        plan: Union[ExecutionPlan, None] = None
+        clarification: Union[ClarificationRequest, None] = None
+        if action in {"history_back", "back", "go_back"}:
+            plan, clarification = build_execution_plan_for_history_back(nav_request.action_plan)
+        else:
+            plan, clarification = build_execution_plan_for_scroll(nav_request.action_plan)
+        if clarification:
+            return clarification
+        if plan:
+            logger.info("Navigator used fast path for basic action %s (trace_id=%s)", action, nav_request.trace_id)
+            return plan
+
     if asi_client.api_url and asi_client.api_key:
         remote = await asi_client.navigate(
             nav_request.action_plan.dict(), nav_request.dom_map.dict()
@@ -74,9 +92,10 @@ async def build_execution_plan(
     else:
         logger.info("Navigator LLM not configured, using heuristics (trace_id=%s)", nav_request.trace_id)
 
-    action = (nav_request.action_plan.action or "").lower()
     if action in {"open_site", "navigate"}:
         plan, clarification = build_execution_plan_for_navigation(nav_request.action_plan)
+    elif action in {"history_back", "back", "go_back"}:
+        plan, clarification = build_execution_plan_for_history_back(nav_request.action_plan)
     elif action in {"scroll", "scroll_page"}:
         plan, clarification = build_execution_plan_for_scroll(nav_request.action_plan)
     elif action in {"search_content", "search", "search_site"}:

@@ -70,6 +70,13 @@ def extract_entities_from_transcript(transcript: str) -> dict:
         "expedia",
         "google",
         "hotels.com",
+        "new york times",
+        "nytimes",
+        "nytimes.com",
+        "the guardian",
+        "guardian",
+        "washington post",
+        "washingtonpost",
     ]
     for site in known_sites:
         if site in lower:
@@ -287,6 +294,18 @@ def map_site_to_url(site: str) -> Optional[str]:
         "www.google.com": "https://www.google.com",
         "hotels.com": "https://www.hotels.com",
         "www.hotels.com": "https://www.hotels.com",
+        "new york times": "https://www.nytimes.com",
+        "nytimes": "https://www.nytimes.com",
+        "nytimes.com": "https://www.nytimes.com",
+        "www.nytimes.com": "https://www.nytimes.com",
+        "the guardian": "https://www.theguardian.com",
+        "guardian": "https://www.theguardian.com",
+        "theguardian.com": "https://www.theguardian.com",
+        "www.theguardian.com": "https://www.theguardian.com",
+        "washington post": "https://www.washingtonpost.com",
+        "washingtonpost": "https://www.washingtonpost.com",
+        "washingtonpost.com": "https://www.washingtonpost.com",
+        "www.washingtonpost.com": "https://www.washingtonpost.com",
     }
     if normalized in mapping:
         return mapping[normalized]
@@ -546,6 +565,27 @@ def build_execution_plan_for_navigation(
                 timeout_ms=6000,
                 retries=0,
                 confidence=0.9,
+            )
+        ],
+    )
+    return plan, None
+
+
+def build_execution_plan_for_history_back(
+    action_plan: ActionPlan,
+) -> Tuple[Optional[ExecutionPlan], Optional[ClarificationRequest]]:
+    plan = ExecutionPlan(
+        id=make_uuid(),
+        trace_id=action_plan.trace_id,
+        steps=[
+            ExecutionStep(
+                step_id="s_history_back",
+                action_type="history_back",
+                element_id=None,
+                value="back",
+                timeout_ms=3000,
+                retries=0,
+                confidence=0.95,
             )
         ],
     )

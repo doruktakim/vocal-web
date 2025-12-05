@@ -38,13 +38,22 @@ async function sendMessageWithInjection(tabId, message) {
   }
 }
 
-async function fetchActionPlan(apiBase, transcript, traceId) {
+async function fetchActionPlan(apiBase, transcript, traceId, pageContext) {
+  const metadata = {};
+  if (pageContext?.page_url) {
+    metadata.page_url = pageContext.page_url;
+    try {
+      metadata.page_host = new URL(pageContext.page_url).hostname;
+    } catch (err) {
+      // ignore URL parsing errors and fall back to the raw page_url
+    }
+  }
   const body = {
     schema_version: "stt_v1",
     id: crypto.randomUUID(),
     trace_id: traceId,
     transcript,
-    metadata: {},
+    metadata,
   };
   const resp = await fetch(`${apiBase}/api/interpreter/actionplan`, {
     method: "POST",
@@ -82,27 +91,70 @@ async function sendExecutionResult(apiBase, result) {
   }
 }
 
+async function collectDomMap(tabId, traceId) {
+  const domMap = await sendMessageWithInjection(tabId, { type: "collect-dommap" });
+  domMap.trace_id = traceId;
+  return domMap;
+}
+
 async function runDemoFlow(transcript, tabId) {
   const apiBase = await getApiBase();
   const traceId = crypto.randomUUID();
-  const domMap = await sendMessageWithInjection(tabId, { type: "collect-dommap" });
-  domMap.trace_id = traceId;
+  let domMap = await collectDomMap(tabId, traceId);
 
-  const actionPlan = await fetchActionPlan(apiBase, transcript, traceId);
+  const actionPlan = await fetchActionPlan(apiBase, transcript, traceId, domMap);
   if (actionPlan.schema_version === "clarification_v1") {
     return { status: "needs_clarification", actionPlan, domMap };
   }
 
-  const executionPlan = await fetchExecutionPlan(apiBase, actionPlan, domMap, traceId);
-  if (executionPlan.schema_version === "clarification_v1") {
-    return { status: "needs_clarification", executionPlan, domMap };
+  let executionPlan = null;
+  let execResult = null;
+
+  // Allow a couple of planning/execution passes to handle "navigate then act on the new page".
+  for (let attempt = 0; attempt < 3; attempt++) {
+    executionPlan = await fetchExecutionPlan(apiBase, actionPlan, domMap, traceId);
+    if (executionPlan.schema_version === "clarification_v1") {
+      return { status: "needs_clarification", executionPlan, domMap };
+    }
+
+    execResult = await sendMessageWithInjection(tabId, {
+      type: "execute-plan",
+      plan: executionPlan,
+    });
+    await sendExecutionResult(apiBase, execResult);
+
+    const steps = executionPlan.steps || [];
+    const navOnly =
+      steps.length === 1 && (steps[0].action_type === "navigate" || steps[0].action_type === "open_site");
+    const navStepId = navOnly ? steps[0].step_id : null;
+    const navSucceeded = navOnly
+      ? (execResult.step_results || []).some((r) => r.step_id === navStepId && r.status === "success")
+      : false;
+
+    const isSearchAction = ["search_content", "search", "search_site"].includes(actionPlan.action);
+    const wantsResultClick =
+      isSearchAction &&
+      (actionPlan?.entities?.latest ||
+        actionPlan?.entities?.position ||
+        (actionPlan.target || "").toLowerCase().includes("video"));
+    const hasResultClickStep = steps.some((s) => s.step_id && s.step_id.includes("click_result"));
+    const searchExecuted = steps.some((s) => s.action_type === "input");
+
+    const needsFollowup =
+      (navOnly && navSucceeded && actionPlan.action !== "navigate" && actionPlan.action !== "open_site") ||
+      (wantsResultClick && searchExecuted && !hasResultClickStep);
+
+    if (needsFollowup) {
+      // Give the page time to finish loading/rendering results, then collect a fresh DOMMap and re-plan.
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      domMap = await collectDomMap(tabId, traceId);
+      continue;
+    }
+
+    // Either not a navigation/search-only plan, or no follow-up needed; stop here.
+    break;
   }
 
-  const execResult = await sendMessageWithInjection(tabId, {
-    type: "execute-plan",
-    plan: executionPlan,
-  });
-  await sendExecutionResult(apiBase, execResult);
   return { status: "completed", actionPlan, executionPlan, execResult, domMap };
 }
 
@@ -127,6 +179,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.sync.set({ vcaaApiBase: message.apiBase || DEFAULT_API_BASE }, () =>
       sendResponse({ status: "ok" })
     );
+    return true;
+  }
+
+  if (message?.type === "vcaa-dump-dommap") {
+    // Debug helper: capture the DOMMap of the active tab and return it.
+    chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .then(async (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id) {
+          sendResponse({ status: "error", error: "No active tab" });
+          return;
+        }
+        try {
+          const traceId = crypto.randomUUID();
+          const domMap = await collectDomMap(tab.id, traceId);
+          sendResponse({ status: "ok", domMap });
+        } catch (err) {
+          sendResponse({ status: "error", error: String(err) });
+        }
+      })
+      .catch((err) => sendResponse({ status: "error", error: String(err) }));
     return true;
   }
 
