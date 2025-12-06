@@ -19,7 +19,11 @@ This repository implements the MVP described in `AGENTS.md`: interpreter and nav
    - Point the agents/bridge at it with `export GOOGLE_APPLICATION_CREDENTIALS="/Users/aliyigituzun/Desktop/VCAA Keys/gc-stt.json"`.
    - The HTTP bridge now exposes `/api/stt/transcribe`, which accepts `audio_base64`, `sample_rate_hertz`, `encoding`, and `language_code` and returns the transcript JSON.
 4. Run the local harness: `python dev/harness/demo_flow.py`.
-4. Load the `extension/` folder as an unpacked extension in Chrome. Open the popup, set API base (default `http://localhost:8081`), and click **Run Demo** with an active flight search page.
+5. Load the `extension/` folder as an unpacked extension in Chrome. Open the popup, set API base (default `http://localhost:8081`), and click **Run Demo** with an active flight search page.
+
+### Local access page
+
+Open `local-access.html` for an accessible, keyboard-friendly front end. You can serve the repo root with `python -m http.server 8000` and visit `http://localhost:8000/local-access.html`, but for the full interpreter → navigator → execution flow load it through the unpacked extension by navigating to `chrome-extension://<your-extension-id>/local-access.html` (the file is packaged with the extension). When run inside the extension, speech output is routed through the background `vcaa-run-demo` flow so DOM actions actually execute; otherwise the page falls back to calling `/api/interpreter/actionplan` directly. Set the API base to `http://localhost:8081` (or your bridge), dictate or paste a prompt, and tap **Run demo**.
 
 ## Notes
 - All messages include `schema_version` and `id` fields per `AGENTS.md`.

@@ -4,9 +4,12 @@ agents:
     dockerfile: agents/Dockerfile.interpreter
     env:
       ASI_CLOUD_API_KEY: ${ASI_CLOUD_API_KEY}
+      ASI_CLOUD_API_URL: ${ASI_CLOUD_API_URL}
       INTERPRETER_SEED: ${INTERPRETER_SEED:-interpreter-seed}
   navigator:
     dockerfile: agents/Dockerfile.navigator
     env:
       ASI_CLOUD_API_KEY: ${ASI_CLOUD_API_KEY}
+      ASI_CLOUD_API_URL: ${ASI_CLOUD_API_URL}
       NAVIGATOR_SEED: ${NAVIGATOR_SEED:-navigator-seed}
+

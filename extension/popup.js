@@ -43,6 +43,7 @@ function ensureRecognition() {
     if (transcript) {
       transcriptField.value = transcript;
       log(`Heard: ${transcript}`);
+      runDemo(transcript);
     }
   };
   recognition.onend = () => {
@@ -190,13 +191,35 @@ function loadConfig() {
   });
 }
 
-runButton.addEventListener("click", () => {
-  const transcript = transcriptField.value.trim();
+function runDemo(transcriptInput) {
+  const transcript = (transcriptInput || transcriptField.value).trim();
+  if (!transcript) {
+    log("Please provide a transcript before running the demo.");
+    return;
+  }
   const apiBase = apiBaseField.value.trim();
+  console.log("Status: Requesting action plan...");
   chrome.runtime.sendMessage({ type: "vcaa-set-api", apiBase });
   chrome.runtime.sendMessage({ type: "vcaa-run-demo", transcript }, (resp) => {
     log(formatResponse(resp));
+    if (!resp) {
+      console.log("Status: No response from extension");
+      return;
+    }
+    if (resp.status === "error") {
+      console.log("Status: Last run failed");
+      return;
+    }
+    if (resp.status === "needs_clarification") {
+      console.log("Status: Awaiting clarification");
+      return;
+    }
+    console.log("Status: Completed successfully");
   });
+}
+
+runButton.addEventListener("click", () => {
+  runDemo();
 });
 
 if (micToggle) {
