@@ -1,0 +1,51 @@
+.DS_Store
+Thumbs.db
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+
+# Node/Chrome extension tooling
+node_modules/
+yarn-debug.log*
+yarn-error.log*
+npm-debug.log*
+package-lock.json
+yarn.lock
+
+# IDE/configuration
+.idea/
+.vscode/
+*.sublime-workspace
+
+# Local environment secrets/logs
+.env
+*.env
+.DS_Store
+*.log
+extension/*.log
+dev/*.log
+
+# Platform-specific
+.coverage
+coverage/
+*.cache
+*.pid
+
+# Safari/Chrome
+LocalStorage/
+chrome_debug.log
+
+# Misc
+/dist/
+/build/
