@@ -18,6 +18,12 @@
       </label>
       <button id="micToggle" type="button" aria-live="polite">🎙️ Start listening</button>
       <button id="run">Run Demo</button>
+      <div id="clarificationPanel" role="status" aria-live="polite"></div>
+      <div class="clarification-controls">
+        <button id="resetClarification" type="button">Reset clarifications</button>
+      </div>
+      <div id="clarificationPanel" role="status" aria-live="polite"></div>
+      <div id="clarificationHistory" class="clarification-history"></div>
       <pre id="output"></pre>
     </main>
     <script src="popup.js"></script>

@@ -77,6 +77,8 @@ def extract_entities_from_transcript(transcript: str) -> dict:
         "guardian",
         "washington post",
         "washingtonpost",
+        "amazon",
+        "amazon.com",
     ]
     for site in known_sites:
         if site in lower:
@@ -306,6 +308,9 @@ def map_site_to_url(site: str) -> Optional[str]:
         "washingtonpost": "https://www.washingtonpost.com",
         "washingtonpost.com": "https://www.washingtonpost.com",
         "www.washingtonpost.com": "https://www.washingtonpost.com",
+        "amazon": "https://www.amazon.com",
+        "www.amazon.com": "https://www.amazon.com",
+        "amazon.com": "https://www.amazon.com",
     }
     if normalized in mapping:
         return mapping[normalized]

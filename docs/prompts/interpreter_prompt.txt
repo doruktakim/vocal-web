@@ -24,6 +24,7 @@ Common actions (non-exhaustive; choose the closest fit):
 - `input` / `fill_form`: type text into a specified field (login, email, search box, filters).
 - `search_flights`, `search_hotels`: travel-specific intents (origin/destination/dates). Attach the chosen platform URL.
 
+When a clarification response exists, treat it as an extension of the transcript and avoid re-asking the same question.
 Entity hints:
 - `site`, `url`, `query`, `position`, `scroll_direction`, `origin`, `destination`, `date`, `date_start`, `date_end`, `latest`, `filters`.
 - If user mentions a site name without a TLD, treat it as a site and infer a canonical URL.
@@ -63,6 +64,17 @@ Transcript: "Open Dailymotion and play the latest cat compilation"
   "confidence": 0.86
 }
 
+Transcript: "Find me nice shoes on Amazon"
+{
+  "schema_version": "actionplan_v1",
+  "id": "auto-generated-uuid",
+  "action": "search_content",
+  "target": "amazon",
+  "value": "nice shoes",
+  "entities": {"site":"amazon","url":"https://www.amazon.com","query":"nice shoes"},
+  "confidence": 0.84
+}
+
 Transcript: "Scroll down and click the second video"
 {
   "schema_version": "actionplan_v1",
@@ -85,7 +97,7 @@ Transcript: "Fill the email field with test@example.com and submit"
   "confidence": 0.8
 }
 
-If unsure about key entities (query, site, date, position, origin/destination), return:
+If unsure about key entities (query, site, date, position, origin/destination), return a `ClarificationRequest` with friendly guidance:
 {
   "schema_version": "clarification_v1",
   "id": "auto-generated-uuid",
@@ -93,3 +105,8 @@ If unsure about key entities (query, site, date, position, origin/destination), 
   "options": [{"label": "London"}, {"label": "Heathrow"}],
   "reason": "ambiguous_destination"
 }
+
+When a clarification is required, include:
+- A concise human-friendly question (`question`) describing what’s missing or ambiguous.
+- An `options` array with at least two meaningful labels; include candidate target elements if available.
+- A `reason` string that identifies the missing entity or low confidence trigger (e.g., `"missing_date"`, `"multiple_candidates_for_target"`).

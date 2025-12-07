@@ -38,7 +38,14 @@ async function sendMessageWithInjection(tabId, message) {
   }
 }
 
-async function fetchActionPlan(apiBase, transcript, traceId, pageContext) {
+async function fetchActionPlan(
+  apiBase,
+  transcript,
+  traceId,
+  pageContext,
+  clarificationResponse,
+  clarificationHistory = []
+) {
   const metadata = {};
   if (pageContext?.page_url) {
     metadata.page_url = pageContext.page_url;
@@ -47,6 +54,12 @@ async function fetchActionPlan(apiBase, transcript, traceId, pageContext) {
     } catch (err) {
       // ignore URL parsing errors and fall back to the raw page_url
     }
+  }
+  if (clarificationResponse) {
+    metadata.clarification_response = clarificationResponse;
+  }
+  if (clarificationHistory?.length) {
+    metadata.clarification_history = clarificationHistory;
   }
   const body = {
     schema_version: "stt_v1",
@@ -97,14 +110,156 @@ async function collectDomMap(tabId, traceId) {
   return domMap;
 }
 
-async function runDemoFlow(transcript, tabId) {
+const HUMAN_CLARIFICATION_REASONS = new Set([
+  "missing_query",
+  "ambiguous_destination",
+  "ambiguous_origin",
+  "missing_origin",
+  "missing_destination",
+  "missing_date",
+  "ambiguous_date",
+]);
+
+function shouldAskHumanClarification(clarification) {
+  if (!clarification || !clarification.reason) {
+    return true;
+  }
+  return HUMAN_CLARIFICATION_REASONS.has(clarification.reason);
+}
+
+async function performClarificationFallback(clarification, tabId, apiBase, traceId) {
+  const candidate = clarification.options?.find((option) => option.candidate_element_ids?.length);
+  if (!candidate) {
+    return false;
+  }
+  const elementId = candidate.candidate_element_ids[0];
+  const fallbackPlan = {
+    schema_version: "executionplan_v1",
+    id: crypto.randomUUID(),
+    trace_id: traceId,
+    steps: [
+      {
+        step_id: `s_fallback_${elementId}`,
+        action_type: "click",
+        element_id: elementId,
+        timeout_ms: 4000,
+        retries: 1,
+      },
+    ],
+  };
+  const result = await sendMessageWithInjection(tabId, {
+    type: "execute-plan",
+    plan: fallbackPlan,
+  });
+  await sendExecutionResult(apiBase, result);
+  return !!result;
+}
+
+async function validateExecution(
+  apiBase,
+  traceId,
+  actionPlan,
+  domMap,
+  executionPlan,
+  execResult
+) {
+  const validationActionPlan = {
+    ...actionPlan,
+    validation_context: {
+      previous_execution_plan: executionPlan?.steps || [],
+      execution_result: execResult || null,
+    },
+  };
+  const validationPlan = await fetchExecutionPlan(
+    apiBase,
+    validationActionPlan,
+    domMap,
+    traceId
+  );
+  if (validationPlan.schema_version === "clarification_v1") {
+    return { clarification: validationPlan };
+  }
+  return validationPlan;
+}
+
+async function runDemoFlow(
+  transcript,
+  tabId,
+  clarificationResponse,
+  clarificationHistory = []
+) {
   const apiBase = await getApiBase();
   const traceId = crypto.randomUUID();
   let domMap = await collectDomMap(tabId, traceId);
 
-  const actionPlan = await fetchActionPlan(apiBase, transcript, traceId, domMap);
+  const actionPlan = await fetchActionPlan(
+    apiBase,
+    transcript,
+    traceId,
+    domMap,
+    clarificationResponse,
+    clarificationHistory
+  );
   if (actionPlan.schema_version === "clarification_v1") {
-    return { status: "needs_clarification", actionPlan, domMap };
+    if (shouldAskHumanClarification(actionPlan)) {
+      return { status: "needs_clarification", actionPlan, domMap };
+    }
+    const fallbackApplied = await performClarificationFallback(
+      actionPlan,
+      tabId,
+      apiBase,
+      traceId
+    );
+    if (!fallbackApplied) {
+      return { status: "needs_clarification", actionPlan, domMap };
+    }
+    domMap = await collectDomMap(tabId, traceId);
+  }
+
+  async function ensureNavigationOnTarget() {
+    const desiredUrl = actionPlan?.entities?.url || actionPlan?.value;
+    if (!desiredUrl || !domMap?.page_url) {
+      return null;
+    }
+    const normalizedDomUrl = domMap.page_url.replace(/\/$/, "");
+    const normalizedDesired = desiredUrl.replace(/\/$/, "");
+    if (normalizedDomUrl.startsWith(normalizedDesired)) {
+      return null;
+    }
+
+    const navActionPlan = {
+      schema_version: "actionplan_v1",
+      id: crypto.randomUUID(),
+      trace_id: traceId,
+      action: "open_site",
+      target: actionPlan.entities?.site || actionPlan.target || normalizedDesired,
+      value: normalizedDesired,
+      entities: {
+        site: actionPlan.entities?.site,
+        url: normalizedDesired,
+      },
+      confidence: 0.75,
+    };
+
+    const navExecutionPlan = await fetchExecutionPlan(apiBase, navActionPlan, domMap, traceId);
+    if (navExecutionPlan.schema_version === "clarification_v1") {
+      return { clarification: navExecutionPlan };
+    }
+
+    const navExecResult = await sendMessageWithInjection(tabId, {
+      type: "execute-plan",
+      plan: navExecutionPlan,
+    });
+    await sendExecutionResult(apiBase, navExecResult);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const refreshedDomMap = await collectDomMap(tabId, traceId);
+    domMap = refreshedDomMap;
+    return { navigated: true };
+  }
+
+  const navigationOutcome = await ensureNavigationOnTarget();
+  if (navigationOutcome?.clarification) {
+    return { status: "needs_clarification", executionPlan: navigationOutcome.clarification, domMap };
   }
 
   let executionPlan = null;
@@ -114,7 +269,20 @@ async function runDemoFlow(transcript, tabId) {
   for (let attempt = 0; attempt < 3; attempt++) {
     executionPlan = await fetchExecutionPlan(apiBase, actionPlan, domMap, traceId);
     if (executionPlan.schema_version === "clarification_v1") {
-      return { status: "needs_clarification", executionPlan, domMap };
+      if (shouldAskHumanClarification(executionPlan)) {
+        return { status: "needs_clarification", executionPlan, domMap };
+      }
+      const fallbackApplied = await performClarificationFallback(
+        executionPlan,
+        tabId,
+        apiBase,
+        traceId
+      );
+      if (!fallbackApplied) {
+        return { status: "needs_clarification", executionPlan, domMap };
+      }
+      domMap = await collectDomMap(tabId, traceId);
+      continue;
     }
 
     execResult = await sendMessageWithInjection(tabId, {
@@ -122,6 +290,15 @@ async function runDemoFlow(transcript, tabId) {
       plan: executionPlan,
     });
     await sendExecutionResult(apiBase, execResult);
+
+    const executionErrors = execResult?.errors || [];
+    if (executionErrors.length) {
+      console.warn("Execution errors detected", { traceId, errors: executionErrors });
+      // Allow a moment for the page to settle so the navigator sees updated DOM hints.
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      domMap = await collectDomMap(tabId, traceId);
+      continue;
+    }
 
     const steps = executionPlan.steps || [];
     const navOnly =
@@ -155,6 +332,31 @@ async function runDemoFlow(transcript, tabId) {
     break;
   }
 
+  const validationOutcome = await validateExecution(
+    apiBase,
+    traceId,
+    actionPlan,
+    domMap,
+    executionPlan,
+    execResult
+  );
+  if (validationOutcome?.clarification) {
+    return {
+      status: "needs_clarification",
+      executionPlan: validationOutcome.clarification,
+      domMap,
+    };
+  }
+  if (validationOutcome?.steps?.length) {
+    const validationExecResult = await sendMessageWithInjection(tabId, {
+      type: "execute-plan",
+      plan: validationOutcome,
+    });
+    await sendExecutionResult(apiBase, validationExecResult);
+    domMap = await collectDomMap(tabId, traceId);
+    executionPlan = validationOutcome;
+    execResult = validationExecResult;
+  }
   return { status: "completed", actionPlan, executionPlan, execResult, domMap };
 }
 
@@ -168,7 +370,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ status: "error", error: "No active tab" });
           return;
         }
-        const result = await runDemoFlow(message.transcript, tab.id);
+        const result = await runDemoFlow(
+          message.transcript,
+          tab.id,
+          message.clarificationResponse,
+          message.clarificationHistory || []
+        );
         sendResponse(result);
       })
       .catch((err) => sendResponse({ status: "error", error: String(err) }));

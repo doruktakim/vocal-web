@@ -37,8 +37,23 @@ async def build_action_plan_from_transcript(
     msg: TranscriptMessage, asi_client: ASIClient
 ) -> Union[ActionPlan, ClarificationRequest]:
     # Prefer an LLM-backed parse when available; fallback to local heuristics.
+    metadata = msg.metadata or {}
+    clarity_response = metadata.get("clarification_response")
+    clarification_history = metadata.get("clarification_history") or []
+    additional_context = " ".join(
+        f"{entry.get('question')}: {entry.get('answer')}"
+        for entry in clarification_history
+        if entry.get("answer")
+    )
+    transcript_parts = [msg.transcript, clarity_response, additional_context]
+    transcript_for_processing = " ".join(
+        part.strip() for part in transcript_parts if part and part.strip()
+    )
+    transcript_for_processing = transcript_for_processing or msg.transcript
     if asi_client.api_url and asi_client.api_key:
-        remote = await asi_client.interpret_transcript(msg.transcript, msg.metadata or {})
+        remote = await asi_client.interpret_transcript(
+            transcript_for_processing, msg.metadata or {}
+        )
         if remote:
             logger.info("Interpreter used LLM parse (trace_id=%s)", msg.trace_id)
             if remote.get("schema_version") == "clarification_v1":
@@ -67,8 +82,8 @@ async def build_action_plan_from_transcript(
         logger.info("Interpreter LLM not configured, using heuristics (trace_id=%s)", msg.trace_id)
 
     # Local fallback: broader heuristics across browsing and travel.
-    transcript_lower = msg.transcript.lower()
-    entities = extract_entities_from_transcript(msg.transcript)
+    transcript_lower = transcript_for_processing.lower()
+    entities = extract_entities_from_transcript(transcript_for_processing)
 
     def infer_query_text() -> str:
         if entities.get("query"):

@@ -1,8 +1,16 @@
 const transcriptField = document.getElementById("transcript");
 const apiBaseField = document.getElementById("apiBase");
 const outputEl = document.getElementById("output");
+const clarificationPanel = document.getElementById("clarificationPanel");
+const clarificationHistoryContainer = document.getElementById("clarificationHistory");
 const runButton = document.getElementById("run");
 const micToggle = document.getElementById("micToggle");
+const resetClarificationButton = document.getElementById("resetClarification");
+let pendingClarification = null;
+let clarificationHistory = [];
+let awaitingClarificationResponse = false;
+let lastClarificationQuestion = "";
+let clarificationStack = [];
 
 const SpeechRecognition =
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -41,6 +49,16 @@ function ensureRecognition() {
   recognition.onresult = (event) => {
     const transcript = event.results?.[0]?.[0]?.transcript?.trim();
     if (transcript) {
+      if (awaitingClarificationResponse && pendingClarification) {
+        awaitingClarificationResponse = false;
+        const answer = transcript;
+        addPopupClarificationHistoryEntry(
+          lastClarificationQuestion || "Clarification requested",
+          answer
+        );
+        runDemo(answer, answer);
+        return;
+      }
       transcriptField.value = transcript;
       log(`Heard: ${transcript}`);
       runDemo(transcript);
@@ -48,11 +66,13 @@ function ensureRecognition() {
   };
   recognition.onend = () => {
     isListening = false;
+    awaitingClarificationResponse = false;
     updateMicButtonLabel();
   };
   recognition.onerror = (event) => {
     log(`Speech recognition error: ${event.error}`);
     isListening = false;
+    awaitingClarificationResponse = false;
     updateMicButtonLabel();
   };
 
@@ -77,6 +97,50 @@ async function requestMicrophoneAccess() {
     return false;
   }
 }
+
+const speakClarification = (text) => {
+  if (!text || !window.speechSynthesis) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = resolve;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(utterance);
+  });
+};
+
+const startClarificationListening = async () => {
+  if (awaitingClarificationResponse) {
+    return;
+  }
+  awaitingClarificationResponse = true;
+  log("Listening for clarification...");
+  if (!SpeechRecognition) {
+    awaitingClarificationResponse = false;
+    return;
+  }
+  const granted = await requestMicrophoneAccess();
+  if (!granted) {
+    awaitingClarificationResponse = false;
+    return;
+  }
+  const recognizer = ensureRecognition();
+  if (!recognizer) {
+    awaitingClarificationResponse = false;
+    return;
+  }
+  if (!isListening) {
+    try {
+      isListening = true;
+      updateMicButtonLabel("Listening for clarification…");
+      recognizer.start();
+    } catch (err) {
+      awaitingClarificationResponse = false;
+      log(`Failed to listen: ${err?.message || err}`);
+    }
+  }
+};
 
 async function toggleListening() {
   if (!SpeechRecognition) {
@@ -115,6 +179,43 @@ function log(msg) {
   outputEl.textContent = msg;
 }
 
+const renderPopupClarificationHistory = () => {
+  if (!clarificationHistoryContainer) {
+    return;
+  }
+  clarificationHistoryContainer.innerHTML = "";
+  clarificationHistory.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "clarification-history-row";
+    const question = document.createElement("p");
+    question.className = "clarification-history-question";
+    question.textContent = entry.question;
+    const answer = document.createElement("p");
+    answer.className = "clarification-history-answer";
+    answer.textContent = entry.answer;
+    row.appendChild(question);
+    row.appendChild(answer);
+    clarificationHistoryContainer.appendChild(row);
+  });
+};
+
+const addPopupClarificationHistoryEntry = (question, answer) => {
+  clarificationHistory.unshift({ question, answer });
+  if (clarificationHistory.length > 5) {
+    clarificationHistory = clarificationHistory.slice(0, 5);
+  }
+  renderPopupClarificationHistory();
+  if (question) {
+    clarificationStack.push({ question, answer });
+  }
+};
+
+const clearPopupClarificationHistory = () => {
+  clarificationHistory = [];
+  renderPopupClarificationHistory();
+  clarificationStack = [];
+};
+
 function formatClarification(plan) {
   if (!plan) {
     return "Needs clarification, but no plan was provided.";
@@ -141,6 +242,44 @@ function formatClarification(plan) {
   }
   return lines.join("\n");
 }
+
+const renderClarification = async (clarification) => {
+  pendingClarification = clarification;
+  if (!clarificationPanel) {
+    return;
+  }
+  clarificationPanel.innerHTML = "";
+  if (!clarification) {
+    clarificationPanel.classList.remove("active");
+    awaitingClarificationResponse = false;
+    return;
+  }
+  clarificationPanel.classList.add("active");
+  const question = document.createElement("p");
+  question.className = "clarification-question";
+  question.textContent = clarification.question || "Clarification requested";
+  clarificationPanel.appendChild(question);
+  if (clarification.reason) {
+    const reason = document.createElement("p");
+    reason.className = "clarification-reason";
+    reason.textContent = `Reason: ${clarification.reason}`;
+    clarificationPanel.appendChild(reason);
+  }
+  lastClarificationQuestion = question.textContent;
+  await speakClarification(question.textContent);
+  startClarificationListening();
+};
+
+const clearClarificationPanel = () => {
+  pendingClarification = null;
+  awaitingClarificationResponse = false;
+  if (!clarificationPanel) {
+    return;
+  }
+  clarificationPanel.innerHTML = "";
+  clarificationPanel.classList.remove("active");
+  lastClarificationQuestion = "";
+};
 
 function formatResponse(resp) {
   if (!resp) {
@@ -191,7 +330,7 @@ function loadConfig() {
   });
 }
 
-function runDemo(transcriptInput) {
+function runDemo(transcriptInput, clarificationResponse = null) {
   const transcript = (transcriptInput || transcriptField.value).trim();
   if (!transcript) {
     log("Please provide a transcript before running the demo.");
@@ -199,23 +338,39 @@ function runDemo(transcriptInput) {
   }
   const apiBase = apiBaseField.value.trim();
   console.log("Status: Requesting action plan...");
+  if (!clarificationResponse) {
+    clarificationStack = [];
+  } else if (lastClarificationQuestion) {
+    addPopupClarificationHistoryEntry(lastClarificationQuestion, clarificationResponse);
+    lastClarificationQuestion = "";
+  }
   chrome.runtime.sendMessage({ type: "vcaa-set-api", apiBase });
-  chrome.runtime.sendMessage({ type: "vcaa-run-demo", transcript }, (resp) => {
-    log(formatResponse(resp));
-    if (!resp) {
-      console.log("Status: No response from extension");
-      return;
+  chrome.runtime.sendMessage(
+    {
+      type: "vcaa-run-demo",
+      transcript,
+      clarificationResponse,
+      clarificationHistory: clarificationStack,
+    },
+    (resp) => {
+      log(formatResponse(resp));
+      if (!resp) {
+        console.log("Status: No response from extension");
+        return;
+      }
+      if (resp.status === "error") {
+        console.log("Status: Last run failed");
+        return;
+      }
+      if (resp.status === "needs_clarification") {
+        renderClarification(resp.actionPlan || resp.executionPlan || resp);
+        console.log("Status: Awaiting clarification");
+        return;
+      }
+      clearClarificationPanel();
+      console.log("Status: Completed successfully");
     }
-    if (resp.status === "error") {
-      console.log("Status: Last run failed");
-      return;
-    }
-    if (resp.status === "needs_clarification") {
-      console.log("Status: Awaiting clarification");
-      return;
-    }
-    console.log("Status: Completed successfully");
-  });
+  );
 }
 
 runButton.addEventListener("click", () => {
@@ -228,3 +383,13 @@ if (micToggle) {
 
 updateMicButtonLabel();
 loadConfig();
+
+if (resetClarificationButton) {
+  resetClarificationButton.addEventListener("click", () => {
+    clearClarificationPanel();
+    clearPopupClarificationHistory();
+    log("Clarifications reset.");
+  });
+}
+
+renderPopupClarificationHistory();

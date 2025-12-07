@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VCAA Local Access</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", -apple-system, system-ui, sans-serif;
+        --bg: radial-gradient(circle at top right, #1d4ed8 0%, #0f172a 45%, #020617 100%);
+        --card: #ffffff;
+        --accent: #2563eb;
+        --accent-dark: #1d4ed8;
+        --muted: #475569;
+        --border: #e2e8f0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+      }
+
+      main {
+        width: min(540px, 100%);
+      }
+
+      .card {
+        background: var(--card);
+        border-radius: 28px;
+        padding: 2.25rem;
+        box-shadow: 0 25px 60px rgba(2, 6, 23, 0.45);
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+
+      header h1 {
+        margin: 0.1rem 0 0.3rem;
+        font-size: 2rem;
+      }
+
+      .eyebrow {
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+
+      .lead {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      label {
+        font-size: 0.85rem;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 270px;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        padding: 1.1rem;
+        resize: vertical;
+        font-size: 1.35rem;
+        line-height: 1.5;
+        font-family: inherit;
+        background: #f8fafc;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      label input,
+      input[type="url"] {
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        padding: 0.85rem 1rem;
+        font-size: 1rem;
+        font-family: inherit;
+        background: #f8fafc;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      label input:focus,
+      input[type="url"]:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        outline: none;
+      }
+
+      textarea:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        outline: none;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.75rem;
+        align-items: stretch;
+      }
+
+      button {
+        border: none;
+        border-radius: 20px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      button:active {
+        transform: scale(0.98);
+      }
+
+      #micButton {
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
+        color: white;
+        font-size: 1.25rem;
+        padding: 0;
+        height: 100px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 0.2rem;
+        box-shadow: 0 15px 35px rgba(37, 99, 235, 0.35);
+      }
+
+      #micButton span {
+        pointer-events: none;
+      }
+
+      #runButton {
+        background: #f8fafc;
+        border: 2px solid var(--border);
+        color: var(--muted);
+        font-size: 1rem;
+        padding: 0 1.5rem;
+        min-height: 100px;
+      }
+
+      #runButton:hover {
+        border-color: var(--accent);
+        color: var(--accent-dark);
+      }
+
+      #status {
+        font-size: 0.9rem;
+        color: var(--muted);
+        margin-bottom: 0.25rem;
+      }
+
+      #output {
+        background: #0f172a;
+        color: #e2e8f0;
+        border-radius: 16px;
+        padding: 1rem;
+        font-size: 0.95rem;
+        min-height: 140px;
+        overflow: auto;
+        margin: 0;
+      }
+
+      .clarification-controls {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+      }
+
+      .clarification-controls button {
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        background: transparent;
+        padding: 0.4rem 1rem;
+        font-size: 0.85rem;
+        cursor: pointer;
+        color: var(--muted);
+      }
+
+      .clarification-controls button:hover {
+        background: rgba(37, 99, 235, 0.15);
+        border-color: rgba(37, 99, 235, 0.6);
+      }
+
+      #clarificationPanel {
+        background: rgba(15, 23, 42, 0.8);
+        border-radius: 16px;
+        padding: 0.9rem 1.1rem;
+        color: #e2e8f0;
+        min-height: 60px;
+        margin-bottom: 0.75rem;
+        display: none;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
+
+      #clarificationPanel.active {
+        display: flex;
+      }
+
+      .clarification-question {
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .clarification-reason {
+        margin: 0;
+        font-size: 0.85rem;
+        color: rgba(226, 232, 240, 0.85);
+      }
+
+      .clarification-history {
+        background: rgba(15, 23, 42, 0.5);
+        border-radius: 14px;
+        padding: 0.8rem 1rem;
+        color: #e2e8f0;
+        font-size: 0.9rem;
+        min-height: 80px;
+        margin-bottom: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
+
+      .clarification-history-row {
+        background: rgba(148, 163, 184, 0.1);
+        padding: 0.4rem 0.6rem;
+        border-radius: 10px;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+      }
+
+      .clarification-history-question {
+        margin: 0 0 0.2rem;
+        font-size: 0.85rem;
+        color: #cbd5f5;
+      }
+
+      .clarification-history-answer {
+        margin: 0;
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+
+      #clarificationPanel {
+        background: #111827;
+        border-radius: 16px;
+        padding: 0.9rem 1rem;
+        color: #e2e8f0;
+        font-size: 0.95rem;
+        min-height: 3rem;
+        margin-bottom: 0.5rem;
+        line-height: 1.5;
+        display: none;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      #clarificationPanel.active {
+        display: flex;
+      }
+
+      .clarification-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+      }
+
+      .clarification-option {
+        background: rgba(255, 255, 255, 0.08);
+        color: #f8fafc;
+        border: 1px solid rgba(248, 250, 252, 0.25);
+        padding: 0.45rem 0.8rem;
+        border-radius: 12px;
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+
+      .clarification-option:hover {
+        background: rgba(37, 99, 235, 0.3);
+      }
+
+      @media (max-width: 640px) {
+        .card {
+          padding: 1.5rem;
+        }
+
+        .controls {
+          grid-template-columns: 1fr;
+        }
+
+        #runButton {
+          min-height: 64px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card" aria-live="polite">
+        <header>
+          <p class="eyebrow">VCAA Local Access</p>
+          <h1>Voice-Controlled Assistive Agent</h1>
+          <p class="lead">
+            Large controls let you dictate tasks and trigger actions without precision clicking.
+          </p>
+        </header>
+        <label for="promptInput">Prompt</label>
+        <textarea
+          id="promptInput"
+          placeholder="Show me the cheapest flights from Istanbul to London on January 21, 2026."
+        ></textarea>
+        <label class="api-label" for="apiBase">
+          API base
+          <input id="apiBase" type="url" value="http://localhost:8081" />
+        </label>
+        <div class="controls">
+          <button id="micButton" type="button" aria-pressed="false">
+            <span aria-hidden="true">🎙️</span>
+            <span class="mic-text">Tap to speak</span>
+          </button>
+          <button id="runButton" type="button">Run demo</button>
+        </div>
+        <div id="status">Ready for your command.</div>
+        <div class="clarification-controls">
+          <button id="resetClarification" type="button">Reset clarifications</button>
+        </div>
+        <div id="clarificationPanel" role="status" aria-live="polite"></div>
+        <div id="clarificationHistory" class="clarification-history"></div>
+        <pre id="output">Action plan response will display here.</pre>
+      </section>
+    </main>
+    <script src="local-access.js"></script>
+  </body>
+</html>

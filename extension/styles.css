@@ -51,3 +51,118 @@ pre {
   font-size: 11px;
   overflow: auto;
 }
+
+#clarificationPanel {
+  display: none;
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: 14px;
+  padding: 0.8rem 1rem;
+  color: #e2e8f0;
+  font-size: 12px;
+  margin-bottom: 0.6rem;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+#clarificationPanel.active {
+  display: flex;
+}
+
+.clarification-question {
+  font-weight: 600;
+  margin: 0;
+}
+
+.clarification-reason {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.clarification-history {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 12px;
+  padding: 0.6rem 0.8rem;
+  color: #e2e8f0;
+  font-size: 11px;
+  min-height: 60px;
+  margin-bottom: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.clarification-history-row {
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 10px;
+  padding: 0.35rem 0.6rem;
+}
+
+.clarification-history-question {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #cbd5f5;
+}
+
+.clarification-history-answer {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.clarification-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.4rem;
+}
+
+.clarification-controls button {
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: transparent;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: #e2e8f0;
+}
+
+.clarification-controls button:hover {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(37, 99, 235, 0.8);
+}
+
+.clarification-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.clarification-option {
+  background: #1f2937;
+  border: 1px solid #374151;
+  color: #e5e7eb;
+  padding: 4px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.clarification-option:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: white;
+}
+#clarificationPanel {
+  display: none;
+  background: #0f172a;
+  border-radius: 12px;
+  padding: 8px;
+  color: #e2e8f0;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+#clarificationPanel.active {
+  display: block;
+}
