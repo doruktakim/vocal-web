@@ -67,11 +67,27 @@ class ASIClient:
             return None
 
     @staticmethod
-    def _trim_dom_map(dom_map: Dict[str, Any], max_elements: int = 120, text_limit: int = 140) -> Dict[str, Any]:
-        """Reduce DOM payload size while keeping useful matching hints."""
+    def _trim_dom_map(dom_map: Dict[str, Any], max_elements: int = 180, text_limit: int = 140) -> Dict[str, Any]:
+        """Reduce DOM payload size while keeping useful matching hints, preferring on-screen visible elements."""
         elements = dom_map.get("elements", []) or []
+
+        def is_visible(el: Dict[str, Any]) -> bool:
+            if not el.get("visible"):
+                return False
+            rect = el.get("bounding_rect") or {}
+            return rect.get("width", 0) > 0 and rect.get("height", 0) > 0
+
+        def rect_y(el: Dict[str, Any]) -> float:
+            rect = el.get("bounding_rect") or {}
+            return rect.get("y", float("inf"))
+
+        # Prioritize visible, on-screen elements ordered from top to bottom, then fill with the rest.
+        visible_sorted = sorted([el for el in elements if is_visible(el)], key=rect_y)
+        remainder = [el for el in elements if el not in visible_sorted]
+        prioritized = (visible_sorted + remainder)[:max_elements]
+
         trimmed = []
-        for el in elements[:max_elements]:
+        for el in prioritized:
             trimmed.append(
                 {
                     "element_id": el.get("element_id"),
