@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Union
 
 from uagents import Agent, Bureau, Context
@@ -11,6 +12,7 @@ from uagents import Agent, Bureau, Context
 try:
     from agents.shared.asi_client import ASIClient
     from agents.shared.schemas import (
+        ActionPlan,
         ClarificationRequest,
         DOMMap,
         ExecutionPlan,
@@ -19,6 +21,7 @@ try:
     from agents.shared.utils import (
         build_execution_plan_for_click_result,
         build_execution_plan_for_destination_search,
+        build_execution_plan_for_flight_date_update,
         build_execution_plan_for_flight_search,
         build_execution_plan_for_history_back,
         build_execution_plan_for_navigation,
@@ -30,6 +33,7 @@ except Exception:
     # Support running as a script (not as a package)
     from shared.asi_client import ASIClient
     from shared.schemas import (
+        ActionPlan,
         ClarificationRequest,
         DOMMap,
         ExecutionPlan,
@@ -62,6 +66,34 @@ async def build_execution_plan(
     nav_request: NavigationRequest,
 ) -> Union[ExecutionPlan, ClarificationRequest]:
     action = (nav_request.action_plan.action or "").lower()
+    entities = nav_request.action_plan.entities or {}
+    page_url = nav_request.dom_map.page_url or ""
+    has_dates = any(entities.get(k) for k in ["date", "date_start", "date_end"])
+
+    if action in {"update_flight_dates", "update_dates"}:
+        plan, clarification = build_execution_plan_for_flight_date_update(
+            nav_request.action_plan, nav_request.dom_map
+        )
+        if clarification:
+            return clarification
+        if plan:
+            logger.info("Navigator used URL date update path (trace_id=%s)", nav_request.trace_id)
+            return plan
+
+    is_flight_url = bool(re.search(r"/\d{6}/", page_url)) or ("skyscanner" in page_url)
+    if action in {"search_flights", "flight_search", "travel_flights"} and has_dates and is_flight_url:
+        updated = nav_request.action_plan.dict()
+        updated["action"] = "update_flight_dates"
+        updated["target"] = "flight_results_url"
+        updated["value"] = page_url or entities.get("url")
+        plan, clarification = build_execution_plan_for_flight_date_update(
+            ActionPlan(**updated), nav_request.dom_map
+        )
+        if clarification:
+            return clarification
+        if plan:
+            logger.info("Navigator rerouted flight search with dates to URL update (trace_id=%s)", nav_request.trace_id)
+            return plan
 
     # Fast-path: avoid LLM calls for lightweight browser actions.
     if action in {"scroll", "scroll_page", "history_back", "back", "go_back"}:
@@ -108,6 +140,10 @@ async def build_execution_plan(
         )
     elif action in {"search_hotels", "search_stays", "search_travel"}:
         plan, clarification = build_execution_plan_for_destination_search(
+            nav_request.action_plan, nav_request.dom_map
+        )
+    elif action in {"update_flight_dates", "update_dates"}:
+        plan, clarification = build_execution_plan_for_flight_date_update(
             nav_request.action_plan, nav_request.dom_map
         )
     elif action in {"search_flights", "flight_search", "travel_flights"}:

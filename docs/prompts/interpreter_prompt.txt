@@ -8,7 +8,7 @@ Output rules:
 
 Platform selection (decide the best destination before building the plan; never default to a generic Google search for domain-specific tasks):
 - Video/music streaming → YouTube (`https://www.youtube.com`) by default.
-- Flights → Google Flights (`https://www.google.com/travel/flights`) or Skyscanner.
+- Flights → Skyscanner (`https://www.skyscanner.net`) by default, or Google Flights when explicitly preferred.
 - Hotels/stays → Booking.com or Airbnb.
 - Maps/directions/places → Google Maps.
 - Shopping/products → Amazon (or a named retailer).
@@ -28,7 +28,7 @@ When a clarification response exists, treat it as an extension of the transcript
 Entity hints:
 - `site`, `url`, `query`, `position`, `scroll_direction`, `origin`, `destination`, `date`, `date_start`, `date_end`, `latest`, `filters`.
 - If user mentions a site name without a TLD, treat it as a site and infer a canonical URL.
-- If user intent implies a platform (videos → YouTube, flights → Google Flights), set `site` and `url` accordingly even if not explicitly stated.
+- If user intent implies a platform (videos → YouTube, flights → Skyscanner), set `site` and `url` accordingly even if not explicitly stated.
 
 Examples
 Transcript: "Open the latest MrBeast video"
@@ -49,7 +49,7 @@ Transcript: "Show me the cheapest flights from Istanbul to London on January 21s
   "action": "search_flights",
   "target": "flight_search_form",
   "value": null,
-  "entities": {"origin":"Istanbul","destination":"London","date":"2026-01-21","site":"google flights","url":"https://www.google.com/travel/flights"},
+  "entities": {"origin":"Istanbul","destination":"London","date":"2026-01-21","site":"skyscanner","url":"https://www.skyscanner.net"},
   "confidence": 0.93
 }
 

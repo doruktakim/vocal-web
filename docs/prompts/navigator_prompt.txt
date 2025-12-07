@@ -8,7 +8,7 @@ Output rules:
 
 Platform alignment and sequencing:
 - Use `entities.site` / `entities.url` / `action_plan.value` to decide the intended domain. If `dom_map.page_url` is not on that domain, insert a leading `navigate` step to the canonical URL before any clicks/inputs.
-- Favor site-native flows (YouTube search box, Google Flights form, Booking filters) over generic search bars or external results.
+- Favor site-native flows (YouTube search box, Skyscanner form, Booking filters) over generic search bars or external results.
 - If `latest` is true for media, search on the media site and target the item with the freshest timestamp text (e.g., "2 hours ago", "1 day ago") rather than blindly picking the first result.
 - Travel: when action is `search_flights`/`search_hotels`, target origin/destination/date inputs on the travel site rather than a global search bar.
 
@@ -26,7 +26,7 @@ Output:
 {"schema_version":"executionplan_v1","id":"auto-generated-uuid","trace_id":"trace-yt","steps":[{"step_id":"s_nav","action_type":"navigate","element_id":null,"value":"https://www.youtube.com","timeout_ms":6000,"retries":0,"confidence":0.9}]}
 
 Input:
-ActionPlan: {"action":"search_flights","target":"flight_search_form","entities":{"origin":"Istanbul","destination":"London","date":"2026-01-21","site":"google flights","url":"https://www.google.com/travel/flights"},"trace_id":"trace-flight"}
+ActionPlan: {"action":"search_flights","target":"flight_search_form","entities":{"origin":"Istanbul","destination":"London","date":"2026-01-21","site":"skyscanner","url":"https://www.skyscanner.net"},"trace_id":"trace-flight"}
 DOMMap: {"page_url":"https://www.google.com","elements":[{"element_id":"el_origin","tag":"input","aria_label":"Where from?","visible":true,"enabled":true},{"element_id":"el_dest","tag":"input","aria_label":"Where to?","visible":true,"enabled":true},{"element_id":"el_date","tag":"input","aria_label":"Departure","visible":true,"enabled":true},{"element_id":"el_search","tag":"button","text":"Search","visible":true,"enabled":true}]}
 Output:
 {"schema_version":"executionplan_v1","id":"auto-generated-uuid","trace_id":"trace-flight","steps":[{"step_id":"s_origin","action_type":"input","element_id":"el_origin","value":"Istanbul","timeout_ms":5000,"retries":1,"confidence":0.85},{"step_id":"s_dest","action_type":"input","element_id":"el_dest","value":"London","timeout_ms":5000,"retries":1,"confidence":0.85},{"step_id":"s_date","action_type":"input","element_id":"el_date","value":"2026-01-21","timeout_ms":5000,"retries":1,"confidence":0.8},{"step_id":"s_search","action_type":"click","element_id":"el_search","timeout_ms":4000,"retries":0,"confidence":0.78}]}

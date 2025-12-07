@@ -38,6 +38,12 @@ async def build_action_plan_from_transcript(
 ) -> Union[ActionPlan, ClarificationRequest]:
     # Prefer an LLM-backed parse when available; fallback to local heuristics.
     metadata = msg.metadata or {}
+    page_url = metadata.get("page_url")
+    page_host = metadata.get("page_host") or ""
+    flight_site_context = any(
+        hint in (page_host or "") or hint in (page_url or "")
+        for hint in ["skyscanner", "kayak", "expedia"]
+    )
     clarity_response = metadata.get("clarification_response")
     clarification_history = metadata.get("clarification_history") or []
     additional_context = " ".join(
@@ -74,6 +80,11 @@ async def build_action_plan_from_transcript(
                             merged["url"] = url
                     if not plan.target and merged.get("site"):
                         plan.target = merged["site"]
+                has_date_remote = any(merged.get(k) for k in ["date", "date_start", "date_end"])
+                if flight_site_context and has_date_remote:
+                    plan.action = "update_flight_dates"
+                    plan.target = "flight_results_url"
+                    plan.value = merged.get("url") or page_url
                 plan.entities = merged or None
                 return plan
         else:
@@ -84,6 +95,10 @@ async def build_action_plan_from_transcript(
     # Local fallback: broader heuristics across browsing and travel.
     transcript_lower = transcript_for_processing.lower()
     entities = extract_entities_from_transcript(transcript_for_processing)
+    if page_url and flight_site_context and "url" not in entities:
+        entities["url"] = page_url
+    if flight_site_context and not entities.get("site") and page_host:
+        entities["site"] = page_host
 
     def infer_query_text() -> str:
         if entities.get("query"):
@@ -107,7 +122,7 @@ async def build_action_plan_from_transcript(
         )
 
     video_intent = any(word in transcript_lower for word in ["video", "videos", "watch", "play", "music", "song", "clip", "trailer", "episode"])
-    flight_intent = any(word in transcript_lower for word in ["flight", "flights", "airfare", "plane ticket"])
+    flight_intent = any(word in transcript_lower for word in ["flight", "flights", "airfare", "plane ticket"]) or flight_site_context
     search_signal = any(word in transcript_lower for word in ["search", "find", "look up", "look for", "watch", "play", "show me"])
     query_text = infer_query_text() if (video_intent or search_signal or entities.get("query")) else None
     if query_text:
@@ -120,8 +135,8 @@ async def build_action_plan_from_transcript(
         if url:
             entities["url"] = url
     if flight_intent and not entities.get("site"):
-        entities["site"] = "google flights"
-        url = map_site_to_url("google flights")
+        entities["site"] = "skyscanner"
+        url = map_site_to_url("skyscanner")
         if url:
             entities["url"] = url
 
@@ -155,24 +170,23 @@ async def build_action_plan_from_transcript(
     has_date = any(k in entities for k in ["date", "date_start", "date_end"])
     hotel_intent = any(word in transcript_lower for word in ["hotel", "stay", "booking", "bookings.com"])
 
-    if has_route and has_date:
+    if has_date and flight_site_context:
         return ActionPlan(
             id=make_uuid(),
             trace_id=msg.trace_id,
-            action="search_flights",
-            target="flight_search_form",
+            action="update_flight_dates",
+            target="flight_results_url",
+            value=entities.get("url") or page_url,
             entities=entities,
-            confidence=0.88,
+            confidence=0.86,
         )
 
-    if "flight" in transcript_lower or "flights" in transcript_lower:
+    if flight_intent:
         missing = []
         if "origin" not in entities:
             missing.append("origin city")
         if "destination" not in entities:
             missing.append("destination city")
-        if not has_date:
-            missing.append("date")
         if missing:
             return ClarificationRequest(
                 id=make_uuid(),
@@ -181,13 +195,17 @@ async def build_action_plan_from_transcript(
                 options=[ClarificationOption(label=item) for item in missing],
                 reason="missing_entities",
             )
+        followups = []
+        if not has_date:
+            followups.append("date")
         return ActionPlan(
             id=make_uuid(),
             trace_id=msg.trace_id,
             action="search_flights",
             target="flight_search_form",
             entities=entities,
-            confidence=0.8,
+            required_followup=followups,
+            confidence=0.85 if has_route else 0.75,
         )
 
     if hotel_intent and has_destination_only:

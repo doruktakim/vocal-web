@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import datetime
 from typing import List, Optional, Sequence, Set, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 import calendar
 from dateutil import parser
@@ -143,6 +144,17 @@ def extract_entities_from_transcript(transcript: str) -> dict:
         normalized_date = normalize_date(date_match.group(1))
         if normalized_date:
             entities["date"] = normalized_date
+
+    depart_match = re.search(r"depart(?:ing)?\s+on\s+([A-Za-z0-9 ,/]+)", transcript, re.IGNORECASE)
+    if depart_match:
+        normalized = normalize_date(depart_match.group(1))
+        if normalized:
+            entities["date_start"] = normalized
+    return_match = re.search(r"return(?:ing)?\s+on\s+([A-Za-z0-9 ,/]+)", transcript, re.IGNORECASE)
+    if return_match:
+        normalized = normalize_date(return_match.group(1))
+        if normalized:
+            entities["date_end"] = normalized
 
     # Route / destination
     route_match = re.search(r"from\s+(.+?)\s+to\s+(.+?)(?:\s+on\b|,|$)", transcript, re.IGNORECASE)
@@ -330,6 +342,57 @@ def map_site_to_url(site: str) -> Optional[str]:
     if "." in normalized:
         return f"https://{normalized}"
     return None
+
+
+def format_compact_date_for_url(date_iso: Optional[str]) -> Optional[str]:
+    """Convert an ISO date to the compact YYMMDD string used in flight URLs."""
+    if not date_iso:
+        return None
+    try:
+        dt = parser.parse(date_iso).date()
+        return f"{dt.year % 100:02d}{dt.month:02d}{dt.day:02d}"
+    except Exception:
+        return None
+
+
+def rewrite_flight_dates_in_url(page_url: str, outbound: str, inbound: Optional[str]) -> Optional[str]:
+    """Rewrite date segments in a Skyscanner-like flights URL (e.g., /YYMMDD/YYMMDD/)."""
+    if not page_url or not outbound:
+        return None
+    try:
+        parsed = urlsplit(page_url)
+    except Exception:
+        return None
+    parts = parsed.path.split("/")
+    date_indexes = [idx for idx, part in enumerate(parts) if re.fullmatch(r"\d{6}", part)]
+    if not date_indexes:
+        # Fallback: look for the first two 6-digit runs anywhere in the path and replace them in-place.
+        path_matches = list(re.finditer(r"\d{6}", parsed.path))
+        if not path_matches:
+            return None
+        replacements = [outbound]
+        if inbound:
+            replacements.append(inbound)
+        new_path = parsed.path
+        offset = 0
+        for match, replacement in zip(path_matches, replacements):
+            start, end = match.span()
+            start += offset
+            end += offset
+            new_path = new_path[:start] + replacement + new_path[end:]
+            offset += len(replacement) - (end - start)
+        return urlunsplit((parsed.scheme, parsed.netloc, new_path, parsed.query, parsed.fragment))
+
+    updated_parts = list(parts)
+    updated_parts[date_indexes[0]] = outbound
+    if len(date_indexes) > 1 and inbound:
+        updated_parts[date_indexes[1]] = inbound
+    elif inbound and len(date_indexes) == 1:
+        insert_at = date_indexes[0] + 1
+        updated_parts.insert(insert_at, inbound)
+
+    new_path = "/".join(updated_parts)
+    return urlunsplit((parsed.scheme, parsed.netloc, new_path, parsed.query, parsed.fragment))
 
 
 def combine_element_text(el: DOMElement) -> str:
@@ -950,11 +1013,6 @@ def build_execution_plan_for_flight_search(
             {"combobox", "textbox"},
         ),
         (
-            ["date", "depart", "departure date", "when", "tarih", "tarihi", "tarih seç"],
-            {"input", "textarea", "select", "button", "div", "span"},
-            {"combobox", "textbox", "button"},
-        ),
-        (
             ["search", "find", "go", "ara", "bul", "devam"],
             {"button", "a"},
             {"button"},
@@ -974,14 +1032,8 @@ def build_execution_plan_for_flight_search(
     if dest_el:
         used_ids.add(dest_el.element_id)
 
-    date_el, date_score = pick_best_element(
-        dom_map, *keyword_groups[2], exclude_ids=used_ids
-    )
-    if date_el:
-        used_ids.add(date_el.element_id)
-
     search_el, search_score = pick_best_element(
-        dom_map, *keyword_groups[3], exclude_ids=used_ids
+        dom_map, *keyword_groups[2], exclude_ids=used_ids
     )
     if search_el:
         used_ids.add(search_el.element_id)
@@ -1043,12 +1095,6 @@ def build_execution_plan_for_flight_search(
     if dest_option_el:
         used_ids.add(dest_option_el.element_id)
 
-    date_cell_el, date_cell_score = find_date_cell(
-        dom_map, (action_plan.entities or {}).get("date"), exclude_ids=used_ids
-    )
-    if date_cell_el:
-        used_ids.add(date_cell_el.element_id)
-
     def add_step(el: DOMElement, action_type: str, value: Optional[str], step_id: str, confidence: float, timeout_ms: int = 5000):
         steps.append(
             ExecutionStep(
@@ -1070,18 +1116,62 @@ def build_execution_plan_for_flight_search(
     if dest_option_el and dest_option_score >= 0.5:
         add_step(dest_option_el, "click", None, "s_destination_option", dest_option_score, timeout_ms=4000)
 
-    if date_cell_el:
-        # Click the date input to open the calendar, then click the specific date cell.
-        if date_el:
-            add_step(date_el, "click", None, "s_date_open", max(date_score, 0.5), timeout_ms=4000)
-        add_step(date_cell_el, "click", None, "s_date_pick", date_cell_score, timeout_ms=4000)
-    elif date_el:
-        add_step(date_el, "input", (action_plan.entities or {}).get("date"), "s_date", date_score, timeout_ms=5000)
-
     if search_el:
         add_step(search_el, "click", None, "s_search", search_score, timeout_ms=4000)
 
     plan = ExecutionPlan(
         id=make_uuid(), trace_id=action_plan.trace_id, steps=steps
     )
+    return plan, None
+
+
+def build_execution_plan_for_flight_date_update(
+    action_plan: ActionPlan, dom_map: DOMMap
+) -> Tuple[Optional[ExecutionPlan], Optional[ClarificationRequest]]:
+    entities = action_plan.entities or {}
+    base_url = dom_map.page_url or action_plan.value or entities.get("url")
+    outbound_iso = entities.get("date_start") or entities.get("date")
+    return_iso = entities.get("date_end")
+
+    outbound_compact = format_compact_date_for_url(outbound_iso)
+    return_compact = format_compact_date_for_url(return_iso) if return_iso else None
+
+    if not base_url:
+        return None, ClarificationRequest(
+            id=make_uuid(),
+            trace_id=action_plan.trace_id,
+            question="Which page should I update with the new dates?",
+            options=[],
+            reason="missing_page_url",
+        )
+    if not outbound_compact:
+        return None, ClarificationRequest(
+            id=make_uuid(),
+            trace_id=action_plan.trace_id,
+            question="What is the departure date?",
+            options=[],
+            reason="missing_date",
+        )
+
+    updated_url = rewrite_flight_dates_in_url(base_url, outbound_compact, return_compact)
+    if not updated_url:
+        return None, ClarificationRequest(
+            id=make_uuid(),
+            trace_id=action_plan.trace_id,
+            question="I could not find date segments in the current URL to update.",
+            options=[],
+            reason="missing_date_in_url",
+        )
+
+    step = ExecutionStep(
+        step_id="s_update_flight_dates",
+        action_type="navigate",
+        element_id=None,
+        value=updated_url,
+        timeout_ms=6000,
+        retries=0,
+        confidence=0.9,
+        notes="Navigate directly with updated flight dates in URL",
+    )
+    plan = ExecutionPlan(id=make_uuid(), trace_id=action_plan.trace_id, steps=[step])
     return plan, None
