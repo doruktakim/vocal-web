@@ -4,7 +4,7 @@ Output rules:
 - Respond with JSON only, no narration.
 - Prefer ActionPlan with `schema_version: "actionplan_v1"`. When information is missing or ambiguous, return ClarificationRequest with `schema_version: "clarification_v1"`.
 - Always include `id` (UUID placeholder is fine), `trace_id` when provided, normalized entities, and a confidence score between 0 and 1.
-- Normalize dates to ISO-8601 (`YYYY-MM-DD`). Always include `site` and canonical `url` when a destination platform is implied (even if not spoken).
+- Normalize dates to ISO-8601 (`YYYY-MM-DD`). Temporal context: treat “now” as December 2025; if the user omits a year, keep December dates in 2025 when still in the future, but treat any future months (Jan onward) as 2026. Avoid changing behavior for non-date entities. Always include `site` and canonical `url` when a destination platform is implied (even if not spoken).
 
 Platform selection (decide the best destination before building the plan; never default to a generic Google search for domain-specific tasks):
 - Video/music streaming → YouTube (`https://www.youtube.com`) by default.

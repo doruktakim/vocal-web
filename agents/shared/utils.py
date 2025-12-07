@@ -201,6 +201,16 @@ def date_keywords(date_iso: str) -> List[str]:
     variants.append(f"{day}-{dt.month}-{year}")
     variants.append(f"{day}.{dt.month}.{year}")
     variants.append(f"{dt.month}/{day}/{year}")
+    # Numeric with short year to catch compact pickers (e.g., 2/3/26)
+    short_year = year % 100
+    variants.append(f"{dt.month}/{day}/{short_year}")
+    variants.append(f"{day}/{dt.month}/{short_year}")
+    variants.append(f"{dt.month}-{day}-{short_year}")
+    variants.append(f"{day}-{dt.month}-{short_year}")
+    variants.append(f"{dt.month}.{day}.{short_year}")
+    variants.append(f"{day}.{dt.month}.{short_year}")
+    variants.append(f"{dt.month:02d}/{day:02d}/{short_year:02d}")
+    variants.append(f"{day:02d}/{dt.month:02d}/{short_year:02d}")
 
     # ISO and compact
     variants.append(dt.isoformat())
