@@ -43,6 +43,39 @@ input {
   font-size: 11px;
 }
 
+.connection-security-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.connection-security-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.connection-security-indicator.secure {
+  color: #16a34a;
+}
+
+.connection-security-indicator.insecure {
+  color: #dc2626;
+}
+
+label.require-https-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.require-https-toggle input {
+  width: auto;
+}
+
 .field-status {
   font-size: 11px;
   margin-top: 2px;
