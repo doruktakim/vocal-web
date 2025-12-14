@@ -23,6 +23,13 @@ npm-debug.log*
 package-lock.json
 yarn.lock
 
+# TLS/SSL certificates and keys (never commit these)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
 # IDE/configuration
 .idea/
 .vscode/
