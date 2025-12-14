@@ -96,6 +96,39 @@
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
       }
 
+      .api-key-input {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+      }
+
+      .api-key-input button {
+        border-radius: 14px;
+        border: 1px solid rgba(37, 99, 235, 0.35);
+        background: transparent;
+        padding: 0.5rem 0.9rem;
+        font-size: 0.85rem;
+        cursor: pointer;
+        color: var(--accent-dark);
+      }
+
+      .field-status {
+        font-size: 0.85rem;
+        margin-top: 0.35rem;
+      }
+
+      .status-valid {
+        color: #16a34a;
+      }
+
+      .status-error {
+        color: #dc2626;
+      }
+
+      .status-missing {
+        color: #f59e0b;
+      }
+
       label input:focus,
       input[type="url"]:focus {
         border-color: var(--accent);
@@ -328,6 +361,19 @@
         <label class="api-label" for="apiBase">
           API base
           <input id="apiBase" type="url" value="http://localhost:8081" />
+        </label>
+        <label class="api-label" for="apiKey">
+          API key
+          <div class="api-key-input">
+            <input
+              id="apiKey"
+              type="password"
+              placeholder="Paste generated API key"
+              autocomplete="off"
+            />
+            <button id="toggleApiKeyVisibility" type="button" aria-pressed="false">Show</button>
+          </div>
+          <span id="apiKeyStatus" class="field-status status-missing">API key not set</span>
         </label>
         <div class="controls">
           <button id="micButton" type="button" aria-pressed="false">

@@ -20,6 +20,21 @@
         API Base
         <input id="apiBase" type="text" placeholder="http://localhost:8081" />
       </label>
+      <label>
+        API Key
+        <div class="api-key-input">
+          <input
+            id="apiKey"
+            type="password"
+            autocomplete="off"
+            placeholder="Paste generated API key"
+          />
+          <button id="toggleApiKeyVisibility" type="button" aria-pressed="false">
+            Show
+          </button>
+        </div>
+        <span id="apiKeyStatus" class="field-status status-missing">API key not set</span>
+      </label>
       <button id="micToggle" type="button" aria-live="polite">🎙️ Start listening</button>
       <button id="run">Run Demo</button>
       <div id="clarificationPanel" role="status" aria-live="polite"></div>

@@ -1,5 +1,13 @@
 const DEFAULT_API_BASE = "http://localhost:8081";
 const CONTENT_SCRIPT_FILE = "content.js";
+const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
+
+class AuthenticationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "AuthenticationError";
+  }
+}
 
 async function getApiBase() {
   return new Promise((resolve) => {
@@ -7,6 +15,48 @@ async function getApiBase() {
       resolve(result.vcaaApiBase || DEFAULT_API_BASE);
     });
   });
+}
+
+async function getApiKey() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(["vcaaApiKey"], (result) => resolve(result.vcaaApiKey || ""));
+  });
+}
+
+const isValidApiKey = (value) => API_KEY_PATTERN.test((value || "").trim());
+
+async function getAuthHeaders() {
+  const key = (await getApiKey()).trim();
+  if (!isValidApiKey(key)) {
+    throw new AuthenticationError(
+      "API key missing or invalid. Set it from the Vocal Web extension popup."
+    );
+  }
+  return { "X-API-Key": key };
+}
+
+async function authorizedRequest(apiBase, path, body, expectJson = true) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(await getAuthHeaders()),
+  };
+  const resp = await fetch(`${apiBase}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (resp.status === 401 || resp.status === 403) {
+    throw new AuthenticationError(
+      "Authentication failed with the Vocal Web API. Verify your API key configuration."
+    );
+  }
+  if (!resp.ok) {
+    throw new Error(`Vocal Web API returned ${resp.status}: ${resp.statusText}`);
+  }
+  if (!expectJson) {
+    return null;
+  }
+  return resp.json();
 }
 
 async function injectContentScript(tabId) {
@@ -68,12 +118,7 @@ async function fetchActionPlan(
     transcript,
     metadata,
   };
-  const resp = await fetch(`${apiBase}/api/interpreter/actionplan`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return resp.json();
+  return authorizedRequest(apiBase, "/api/interpreter/actionplan", body);
 }
 
 async function fetchExecutionPlan(apiBase, actionPlan, domMap, traceId) {
@@ -84,22 +129,17 @@ async function fetchExecutionPlan(apiBase, actionPlan, domMap, traceId) {
     action_plan: actionPlan,
     dom_map: domMap,
   };
-  const resp = await fetch(`${apiBase}/api/navigator/executionplan`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return resp.json();
+  return authorizedRequest(apiBase, "/api/navigator/executionplan", body);
 }
 
 async function sendExecutionResult(apiBase, result) {
   try {
-    await fetch(`${apiBase}/api/execution/result`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(result),
-    });
+    await authorizedRequest(apiBase, "/api/execution/result", result, false);
   } catch (err) {
+    if (err instanceof AuthenticationError) {
+      console.warn("Execution result rejected due to authentication failure.");
+      return;
+    }
     console.warn("Failed to post execution result", err);
   }
 }
@@ -182,7 +222,7 @@ async function validateExecution(
   return validationPlan;
 }
 
-async function runDemoFlow(
+async function runDemoFlowInternal(
   transcript,
   tabId,
   clarificationResponse,
@@ -358,6 +398,22 @@ async function runDemoFlow(
     execResult = validationExecResult;
   }
   return { status: "completed", actionPlan, executionPlan, execResult, domMap };
+}
+
+async function runDemoFlow(
+  transcript,
+  tabId,
+  clarificationResponse,
+  clarificationHistory = []
+) {
+  try {
+    return await runDemoFlowInternal(transcript, tabId, clarificationResponse, clarificationHistory);
+  } catch (err) {
+    if (err instanceof AuthenticationError) {
+      return { status: "error", error: err.message };
+    }
+    throw err;
+  }
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

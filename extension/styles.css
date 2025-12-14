@@ -24,6 +24,42 @@ input {
   box-sizing: border-box;
 }
 
+.api-key-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.api-key-input input {
+  flex: 1;
+}
+
+.api-key-input button {
+  padding: 6px 8px;
+  border: 1px solid #cbd5f5;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.field-status {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.status-valid {
+  color: #16a34a;
+}
+
+.status-error {
+  color: #dc2626;
+}
+
+.status-missing {
+  color: #f97316;
+}
+
 button {
   padding: 8px;
   font-weight: 600;

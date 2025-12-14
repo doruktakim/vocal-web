@@ -1,11 +1,15 @@
 const transcriptField = document.getElementById("transcript");
 const apiBaseField = document.getElementById("apiBase");
+const apiKeyField = document.getElementById("apiKey");
+const apiKeyStatus = document.getElementById("apiKeyStatus");
+const toggleApiKeyVisibility = document.getElementById("toggleApiKeyVisibility");
 const outputEl = document.getElementById("output");
 const clarificationPanel = document.getElementById("clarificationPanel");
 const clarificationHistoryContainer = document.getElementById("clarificationHistory");
 const runButton = document.getElementById("run");
 const micToggle = document.getElementById("micToggle");
 const resetClarificationButton = document.getElementById("resetClarification");
+const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 let pendingClarification = null;
 let clarificationHistory = [];
 let awaitingClarificationResponse = false;
@@ -17,6 +21,47 @@ const SpeechRecognition =
 let recognition = null;
 let isListening = false;
 let microphonePermissionGranted = false;
+
+const isValidApiKey = (value) => API_KEY_PATTERN.test((value || "").trim());
+
+const setApiKeyStatus = (text, tone = "missing") => {
+  if (!apiKeyStatus) {
+    return;
+  }
+  apiKeyStatus.textContent = text;
+  apiKeyStatus.classList.remove("status-valid", "status-error", "status-missing");
+  const className =
+    tone === "valid" ? "status-valid" : tone === "error" ? "status-error" : "status-missing";
+  apiKeyStatus.classList.add(className);
+};
+
+const persistApiKey = (value) => {
+  if (!apiKeyField) {
+    return;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    chrome.storage.sync.remove("vcaaApiKey", () => setApiKeyStatus("API key not set", "missing"));
+    return;
+  }
+  if (!isValidApiKey(trimmed)) {
+    setApiKeyStatus("API key must be at least 32 characters.", "error");
+    return;
+  }
+  chrome.storage.sync.set({ vcaaApiKey: trimmed }, () =>
+    setApiKeyStatus("API key saved", "valid")
+  );
+};
+
+const toggleApiKeyMask = () => {
+  if (!apiKeyField || !toggleApiKeyVisibility) {
+    return;
+  }
+  const showing = apiKeyField.type === "text";
+  apiKeyField.type = showing ? "password" : "text";
+  toggleApiKeyVisibility.textContent = showing ? "Show" : "Hide";
+  toggleApiKeyVisibility.setAttribute("aria-pressed", String(!showing));
+};
 
 function updateMicButtonLabel(text) {
   if (!SpeechRecognition) {
@@ -321,11 +366,19 @@ function formatResponse(resp) {
 }
 
 function loadConfig() {
-  chrome.storage.sync.get(["vcaaApiBase"], (result) => {
+  chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey"], (result) => {
     if (result.vcaaApiBase) {
       apiBaseField.value = result.vcaaApiBase;
     } else {
       apiBaseField.value = "http://localhost:8081";
+    }
+    if (apiKeyField) {
+      apiKeyField.value = result.vcaaApiKey || "";
+      if (result.vcaaApiKey) {
+        setApiKeyStatus("API key saved", "valid");
+      } else {
+        setApiKeyStatus("API key not set", "missing");
+      }
     }
   });
 }
@@ -379,6 +432,14 @@ runButton.addEventListener("click", () => {
 
 if (micToggle) {
   micToggle.addEventListener("click", toggleListening);
+}
+
+if (apiKeyField) {
+  apiKeyField.addEventListener("input", (event) => persistApiKey(event.target.value || ""));
+}
+
+if (toggleApiKeyVisibility) {
+  toggleApiKeyVisibility.addEventListener("click", toggleApiKeyMask);
 }
 
 updateMicButtonLabel();

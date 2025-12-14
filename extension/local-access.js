@@ -4,9 +4,13 @@ const status = document.getElementById("status");
 const output = document.getElementById("output");
 const promptInput = document.getElementById("promptInput");
 const apiBaseInput = document.getElementById("apiBase");
+const apiKeyInput = document.getElementById("apiKey");
+const apiKeyStatus = document.getElementById("apiKeyStatus");
+const toggleApiKeyVisibility = document.getElementById("toggleApiKeyVisibility");
 const clarificationPanel = document.getElementById("clarificationPanel");
 const clarificationHistoryContainer = document.getElementById("clarificationHistory");
 const resetClarificationButton = document.getElementById("resetClarification");
+const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 
 const SpeechRecognition =
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -21,6 +25,57 @@ let clarificationStack = [];
 
 const isExtensionContext =
   typeof globalThis.chrome?.runtime?.sendMessage === "function";
+
+const isValidApiKey = (value) => API_KEY_PATTERN.test((value || "").trim());
+
+const setApiKeyStatus = (text, tone = "missing") => {
+  if (!apiKeyStatus) {
+    return;
+  }
+  apiKeyStatus.textContent = text;
+  apiKeyStatus.classList.remove("status-valid", "status-error", "status-missing");
+  const className =
+    tone === "valid" ? "status-valid" : tone === "error" ? "status-error" : "status-missing";
+  apiKeyStatus.classList.add(className);
+};
+
+const persistApiKey = (value) => {
+  if (!apiKeyInput) {
+    return;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    if (isExtensionContext) {
+      chrome.storage.sync.remove("vcaaApiKey", () => setApiKeyStatus("API key not set", "missing"));
+    } else {
+      setApiKeyStatus("API key not set", "missing");
+    }
+    return;
+  }
+  if (!isValidApiKey(trimmed)) {
+    setApiKeyStatus("API key must be at least 32 characters.", "error");
+    return;
+  }
+  if (isExtensionContext) {
+    chrome.storage.sync.set({ vcaaApiKey: trimmed }, () =>
+      setApiKeyStatus("API key saved", "valid")
+    );
+  } else {
+    setApiKeyStatus("API key ready", "valid");
+  }
+};
+
+const toggleApiKeyMask = () => {
+  if (!apiKeyInput || !toggleApiKeyVisibility) {
+    return;
+  }
+  const showing = apiKeyInput.type === "text";
+  apiKeyInput.type = showing ? "password" : "text";
+  toggleApiKeyVisibility.textContent = showing ? "Show" : "Hide";
+  toggleApiKeyVisibility.setAttribute("aria-pressed", String(!showing));
+};
+
+const getActiveApiKey = () => (apiKeyInput?.value || "").trim();
 
 const uuid = () =>
   window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -316,6 +371,10 @@ updateMicButtonLabel();
 const requestActionPlan = async (prompt, apiBase) => {
   const base = normalizeApiBase(apiBase);
   const endpoint = `${base}/api/interpreter/actionplan`;
+  const apiKey = getActiveApiKey();
+  if (!isValidApiKey(apiKey)) {
+    throw new Error("API key missing or invalid. Provide a valid key above.");
+  }
   const body = {
     schema_version: "stt_v1",
     id: uuid(),
@@ -325,9 +384,12 @@ const requestActionPlan = async (prompt, apiBase) => {
   };
   const resp = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
     body: JSON.stringify(body),
   });
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error("Authentication failed. Check your API key configuration.");
+  }
   if (!resp.ok) {
     throw new Error(`Interpreter returned ${resp.status}: ${resp.statusText}`);
   }
@@ -376,6 +438,12 @@ const submitPrompt = async (prompt, autoTriggered = false, clarificationResponse
   if (!trimmed) {
     logStatus("Please enter or dictate a prompt first.");
     output.textContent = "No prompt provided.";
+    return;
+  }
+  const apiKeyValue = getActiveApiKey();
+  if (!isValidApiKey(apiKeyValue)) {
+    logStatus("Please configure a valid API key before running the demo.");
+    output.textContent = "API key missing or invalid.";
     return;
   }
   if (!clarificationResponse) {
@@ -437,13 +505,25 @@ runButton.addEventListener("click", () => submitPrompt(promptInput.value));
 
 const loadConfig = () => {
   if (isExtensionContext) {
-    chrome.storage.sync.get(["vcaaApiBase"], (result) => {
+    chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey"], (result) => {
       if (result.vcaaApiBase) {
         apiBaseInput.value = result.vcaaApiBase;
+      }
+      if (apiKeyInput) {
+        apiKeyInput.value = result.vcaaApiKey || "";
+        if (result.vcaaApiKey) {
+          setApiKeyStatus("API key saved", "valid");
+        } else {
+          setApiKeyStatus("API key not set", "missing");
+        }
       }
     });
   } else {
     apiBaseInput.value = "http://localhost:8081";
+    if (apiKeyInput) {
+      apiKeyInput.value = "";
+      setApiKeyStatus("API key not set", "missing");
+    }
   }
 };
 
@@ -456,6 +536,14 @@ if (isExtensionContext) {
       () => {}
     );
   });
+}
+
+if (apiKeyInput) {
+  apiKeyInput.addEventListener("input", (event) => persistApiKey(event.target.value || ""));
+}
+
+if (toggleApiKeyVisibility) {
+  toggleApiKeyVisibility.addEventListener("click", toggleApiKeyMask);
 }
 
 if (resetClarificationButton) {
