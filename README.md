@@ -68,23 +68,4 @@ This repo is currently under development. Thus, a web extension is currently imp
 1. Improved DOMMap filtering to reduce tokens.
 2. Implementing agent memory for frequently used websites to avoid extensive API calls.
 3. Extension-side shortcuts for primitive actions (scroll/back) so those voice commands execute instantly without hitting the interpreter/navigator HTTP APIs.
-4. Security improvements- see below.
-
-## Security Notice (Pre-Production)
-
-This MVP is **not production-ready**. The following security hardening is required before deployment:
-
-| Issue | Status | Priority |
-|-------|--------|----------|
-| API authentication (JWT/API keys) | Implemented | Critical |
-| CORS origin allowlist (currently `*`) | Implemented | Critical |
-| HTTPS/TLS enforcement | Implemented | Critical |
-| URL validation before navigation | Implemented | Critical |
-| Sensitive field exclusion from DOMMap (passwords, etc.) | Implemented | Critical |
-| Rate limiting on API endpoints | Pending | High |
-| Prompt injection sanitization | Pending | High |
-| Bind to localhost instead of `0.0.0.0` | Implemented | High |
-| Minimize extension permissions | Pending | Medium |
-| Error message sanitization | Pending | Medium |
-
-**Do not expose the API server to the public internet in its current state.**
+4. Security improvements.
