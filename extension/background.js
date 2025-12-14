@@ -1,6 +1,121 @@
 const DEFAULT_API_BASE = "http://localhost:8081";
 const CONTENT_SCRIPT_FILE = "content.js";
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
+const STORAGE_KEYS = {
+  API_BASE: "vcaaApiBase",
+  API_KEY: "vcaaApiKey",
+  REQUIRE_HTTPS: "vcaaRequireHttps",
+  PROTOCOL_PREFERENCE: "vcaaProtocolPreference",
+};
+const HEALTH_TIMEOUT_MS = 2500;
+
+const stripTrailingSlash = (value) => {
+  if (!value) {
+    return value;
+  }
+  return value.replace(/\/+$/, "");
+};
+
+const normalizeApiBaseInput = (value) => {
+  const trimmed = (value || "").trim();
+  if (!trimmed) {
+    return DEFAULT_API_BASE;
+  }
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return `http://${trimmed}`;
+  }
+  return trimmed;
+};
+
+const readSyncStorage = (keys) =>
+  new Promise((resolve) => {
+    chrome.storage.sync.get(keys, (items) => {
+      resolve(items || {});
+    });
+  });
+
+const convertHttpToHttps = (base) => {
+  try {
+    const parsed = new URL(base);
+    parsed.protocol = "https:";
+    return stripTrailingSlash(parsed.toString());
+  } catch (err) {
+    return stripTrailingSlash(base.replace(/^http:/i, "https:"));
+  }
+};
+
+const isHealthReachable = async (baseUrl) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  const probeUrl = `${stripTrailingSlash(baseUrl)}/health`;
+  try {
+    const resp = await fetch(probeUrl, { method: "GET", signal: controller.signal });
+    return resp.ok;
+  } catch (err) {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+async function resolveApiConfig() {
+  const settings = await readSyncStorage([
+    STORAGE_KEYS.API_BASE,
+    STORAGE_KEYS.PROTOCOL_PREFERENCE,
+    STORAGE_KEYS.REQUIRE_HTTPS,
+  ]);
+  let base = stripTrailingSlash(normalizeApiBaseInput(settings[STORAGE_KEYS.API_BASE]));
+  const requireHttps = Boolean(settings[STORAGE_KEYS.REQUIRE_HTTPS]);
+  let preference = settings[STORAGE_KEYS.PROTOCOL_PREFERENCE];
+
+  if (base.startsWith("https://")) {
+    preference = "https";
+  } else if (base.startsWith("http://")) {
+    const httpsCandidate = convertHttpToHttps(base);
+    const needsProbe = requireHttps || !preference;
+    if (preference === "https" && !requireHttps) {
+      base = httpsCandidate;
+    } else if (needsProbe) {
+      const reachable = await isHealthReachable(httpsCandidate);
+      if (!reachable) {
+        if (requireHttps) {
+          throw new Error(
+            "HTTPS is required but the Vocal Web API is unreachable over HTTPS. Verify your TLS configuration."
+          );
+        }
+        preference = "http";
+      } else {
+        base = httpsCandidate;
+        preference = "https";
+      }
+    }
+  } else {
+    throw new Error("API base must start with http:// or https://");
+  }
+
+  if (!preference) {
+    preference = base.startsWith("https://") ? "https" : "http";
+  }
+  chrome.storage.sync.set({ [STORAGE_KEYS.PROTOCOL_PREFERENCE]: preference });
+  return { apiBase: base, isSecure: base.startsWith("https://"), requireHttps };
+}
+
+async function getStoredSecurityState() {
+  const settings = await readSyncStorage([
+    STORAGE_KEYS.API_BASE,
+    STORAGE_KEYS.PROTOCOL_PREFERENCE,
+    STORAGE_KEYS.REQUIRE_HTTPS,
+  ]);
+  const base = stripTrailingSlash(normalizeApiBaseInput(settings[STORAGE_KEYS.API_BASE]));
+  const preference = settings[STORAGE_KEYS.PROTOCOL_PREFERENCE];
+  const isSecure = base.startsWith("https://") || preference === "https";
+  return {
+    apiBase: base,
+    isSecure,
+    requireHttps: Boolean(settings[STORAGE_KEYS.REQUIRE_HTTPS]),
+    protocolPreference: preference || (isSecure ? "https" : "http"),
+  };
+}
 
 class AuthenticationError extends Error {
   constructor(message) {
@@ -9,17 +124,11 @@ class AuthenticationError extends Error {
   }
 }
 
-async function getApiBase() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get(["vcaaApiBase"], (result) => {
-      resolve(result.vcaaApiBase || DEFAULT_API_BASE);
-    });
-  });
-}
-
 async function getApiKey() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(["vcaaApiKey"], (result) => resolve(result.vcaaApiKey || ""));
+    chrome.storage.sync.get([STORAGE_KEYS.API_KEY], (result) =>
+      resolve(result[STORAGE_KEYS.API_KEY] || "")
+    );
   });
 }
 
@@ -228,7 +337,7 @@ async function runDemoFlowInternal(
   clarificationResponse,
   clarificationHistory = []
 ) {
-  const apiBase = await getApiBase();
+  const { apiBase } = await resolveApiConfig();
   const traceId = crypto.randomUUID();
   let domMap = await collectDomMap(tabId, traceId);
 
@@ -439,9 +548,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "vcaa-set-api") {
-    chrome.storage.sync.set({ vcaaApiBase: message.apiBase || DEFAULT_API_BASE }, () =>
+    const normalized = stripTrailingSlash(normalizeApiBaseInput(message.apiBase));
+    const persist = () => chrome.storage.sync.set({ [STORAGE_KEYS.API_BASE]: normalized }, () =>
       sendResponse({ status: "ok" })
     );
+    if (normalized.startsWith("https://")) {
+      chrome.storage.sync.set(
+        {
+          [STORAGE_KEYS.API_BASE]: normalized,
+          [STORAGE_KEYS.PROTOCOL_PREFERENCE]: "https",
+        },
+        () => sendResponse({ status: "ok" })
+      );
+    } else {
+      chrome.storage.sync.remove(STORAGE_KEYS.PROTOCOL_PREFERENCE, persist);
+    }
+    return true;
+  }
+
+  if (message?.type === "vcaa-get-security-state") {
+    getStoredSecurityState()
+      .then((state) => sendResponse({ status: "ok", state }))
+      .catch((err) => sendResponse({ status: "error", error: err?.message || String(err) }));
     return true;
   }
 

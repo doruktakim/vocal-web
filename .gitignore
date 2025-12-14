@@ -40,6 +40,13 @@ yarn.lock
 *.env
 .DS_Store
 *.log
+
+# TLS/SSL certificates and keys (never commit these)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
 extension/*.log
 dev/*.log
 

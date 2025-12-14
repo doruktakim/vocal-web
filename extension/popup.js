@@ -3,6 +3,8 @@ const apiBaseField = document.getElementById("apiBase");
 const apiKeyField = document.getElementById("apiKey");
 const apiKeyStatus = document.getElementById("apiKeyStatus");
 const toggleApiKeyVisibility = document.getElementById("toggleApiKeyVisibility");
+const connectionSecurityStatus = document.getElementById("connectionSecurityStatus");
+const requireHttpsToggle = document.getElementById("requireHttps");
 const outputEl = document.getElementById("output");
 const clarificationPanel = document.getElementById("clarificationPanel");
 const clarificationHistoryContainer = document.getElementById("clarificationHistory");
@@ -62,6 +64,54 @@ const toggleApiKeyMask = () => {
   toggleApiKeyVisibility.textContent = showing ? "Show" : "Hide";
   toggleApiKeyVisibility.setAttribute("aria-pressed", String(!showing));
 };
+
+const updateConnectionSecurityIndicator = (state) => {
+  if (!connectionSecurityStatus) {
+    return;
+  }
+  const secure = Boolean(state?.isSecure);
+  const requireHttps = Boolean(state?.requireHttps);
+  let text = "";
+  let tooltip = "";
+  if (secure) {
+    text = "🔒 HTTPS connection";
+    tooltip = "Traffic between the extension and the API server is encrypted.";
+  } else if (requireHttps) {
+    text = "⚠️ HTTPS required";
+    tooltip =
+      "HTTPS enforcement is enabled but the API base has not passed the HTTPS health check.";
+  } else {
+    text = "⚠️ HTTP connection";
+    tooltip =
+      "Traffic is currently sent over HTTP. Configure TLS on the API server and enable HTTPS.";
+  }
+  connectionSecurityStatus.textContent = text;
+  connectionSecurityStatus.classList.toggle("secure", secure);
+  connectionSecurityStatus.classList.toggle("insecure", !secure);
+  connectionSecurityStatus.setAttribute("title", tooltip);
+};
+
+function refreshConnectionSecurityIndicator() {
+  if (!connectionSecurityStatus) {
+    return;
+  }
+  chrome.runtime.sendMessage({ type: "vcaa-get-security-state" }, (resp) => {
+    if (!resp || resp.status !== "ok") {
+      connectionSecurityStatus.textContent = "⚠️ Unknown security";
+      connectionSecurityStatus.classList.remove("secure");
+      connectionSecurityStatus.classList.add("insecure");
+      connectionSecurityStatus.setAttribute(
+        "title",
+        "Unable to determine API connection security. Ensure the background page is running."
+      );
+      return;
+    }
+    updateConnectionSecurityIndicator(resp.state);
+    if (requireHttpsToggle) {
+      requireHttpsToggle.checked = Boolean(resp.state?.requireHttps);
+    }
+  });
+}
 
 function updateMicButtonLabel(text) {
   if (!SpeechRecognition) {
@@ -366,7 +416,7 @@ function formatResponse(resp) {
 }
 
 function loadConfig() {
-  chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey"], (result) => {
+  chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps"], (result) => {
     if (result.vcaaApiBase) {
       apiBaseField.value = result.vcaaApiBase;
     } else {
@@ -380,6 +430,33 @@ function loadConfig() {
         setApiKeyStatus("API key not set", "missing");
       }
     }
+    if (requireHttpsToggle) {
+      requireHttpsToggle.checked = Boolean(result.vcaaRequireHttps);
+    }
+    refreshConnectionSecurityIndicator();
+  });
+}
+
+function persistApiBaseField(callback) {
+  if (!apiBaseField) {
+    if (typeof callback === "function") {
+      callback();
+    }
+    return;
+  }
+  const apiBase = apiBaseField.value.trim();
+  chrome.runtime.sendMessage({ type: "vcaa-set-api", apiBase }, () => {
+    refreshConnectionSecurityIndicator();
+    if (typeof callback === "function") {
+      callback();
+    }
+  });
+}
+
+function handleRequireHttpsToggle(event) {
+  const enforced = Boolean(event?.target?.checked);
+  chrome.storage.sync.set({ vcaaRequireHttps: enforced }, () => {
+    refreshConnectionSecurityIndicator();
   });
 }
 
@@ -389,7 +466,6 @@ function runDemo(transcriptInput, clarificationResponse = null) {
     log("Please provide a transcript before running the demo.");
     return;
   }
-  const apiBase = apiBaseField.value.trim();
   console.log("Status: Requesting action plan...");
   if (!clarificationResponse) {
     clarificationStack = [];
@@ -397,7 +473,7 @@ function runDemo(transcriptInput, clarificationResponse = null) {
     addPopupClarificationHistoryEntry(lastClarificationQuestion, clarificationResponse);
     lastClarificationQuestion = "";
   }
-  chrome.runtime.sendMessage({ type: "vcaa-set-api", apiBase });
+  persistApiBaseField();
   chrome.runtime.sendMessage(
     {
       type: "vcaa-run-demo",
@@ -440,6 +516,15 @@ if (apiKeyField) {
 
 if (toggleApiKeyVisibility) {
   toggleApiKeyVisibility.addEventListener("click", toggleApiKeyMask);
+}
+
+if (apiBaseField) {
+  apiBaseField.addEventListener("change", () => persistApiBaseField());
+  apiBaseField.addEventListener("blur", () => persistApiBaseField());
+}
+
+if (requireHttpsToggle) {
+  requireHttpsToggle.addEventListener("change", handleRequireHttpsToggle);
 }
 
 updateMicButtonLabel();

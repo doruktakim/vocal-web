@@ -20,6 +20,20 @@
         API Base
         <input id="apiBase" type="text" placeholder="http://localhost:8081" />
       </label>
+      <div class="connection-security-row">
+        <span
+          id="connectionSecurityStatus"
+          class="connection-security-indicator insecure"
+          role="status"
+          aria-live="polite"
+        >
+          ⚠️ HTTP connection
+        </span>
+        <label class="require-https-toggle">
+          <input id="requireHttps" type="checkbox" />
+          Require HTTPS connection
+        </label>
+      </div>
       <label>
         API Key
         <div class="api-key-input">

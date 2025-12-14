@@ -11,7 +11,7 @@ This repo is currently under development. Thus, a web extension is currently imp
 
 ## Quickstart
 1. Install Python deps: `pip install -r requirements.txt`.
-2. Configure API key so the interpreter/navigator can reach the LLM. Without those variables the agents fall back to deterministic heuristics.
+2. Configure LLM API key. The agents fall back to deterministic heuristics without a valid API key.
 ```bash
    export ASI_CLOUD_API_URL="https://inference.asicloud.cudos.org/v1"
    export ASI_CLOUD_API_KEY=<your_api_key>
@@ -20,34 +20,50 @@ This repo is currently under development. Thus, a web extension is currently imp
 3. Configure Google Speech-to-Text API:
    - Drop your service-account JSON somewhere outside the repo (e.g., `/Users/aliyigituzun/Desktop/VCAA Keys/gc-stt.json`).
    - Point the agents/bridge at it with `export GOOGLE_APPLICATION_CREDENTIALS="/Users/aliyigituzun/Desktop/VCAA Keys/gc-stt.json"`.
-   - The HTTP bridge now exposes `/api/stt/transcribe`, which accepts `audio_base64`, `sample_rate_hertz`, `encoding`, and `language_code` and returns the transcript JSON.
-4. Start the HTTP API bridge: `python -m agents.api_server` (defaults to port `8081`).
-5. Load the `extension/` folder as an unpacked extension in Chrome. Open the popup, set API base (default `http://localhost:8081`).
-6. Test the extension by using it on an active webpage (e.g. https://www.google.com).
-
-## Authentication Setup
-The HTTP bridge now requires every request (except `GET /health`) to present an API key via the `X-API-Key` header. Keys are validated with constant-time comparison plus per-IP rate limiting.
-
-1. Generate a strong key (minimum 32 characters, letters/numbers/`-_` only):
+4. Set up authentication:
+   -  Generate a strong key (minimum 32 characters, letters/numbers/`-_` only):
    ```bash
    openssl rand -hex 32
    ```
-2. Export it before starting the API server or add it to a `.env` file derived from `.env.example`:
+   - Export it before starting the API server or add it to a `.env` file derived from `.env.example`:
    ```bash
    export VCAA_API_KEY="paste_the_key_here"
    ```
-3. (Optional) Restrict CORS to additional origins (the Chrome extension scope `chrome-extension://*` is always allowed):
-   ```bash
-   export VCAA_ALLOWED_ORIGINS="https://app.example.com,https://portal.example"
-   ```
-4. Start/Restart `python -m agents.api_server`. The process will exit early if the key is missing or malformed.
-5. Open the extension popup (or `local-access.html`) and paste the same key into the new **API Key** field. A status indicator shows whether it is saved or still missing. Use the “Show/Hide” toggle to reveal the value if needed.
-6. Every extension request now automatically adds the auth header. If the API responds with `401/403`, the popup/local page surface a friendly “check API key configuration” error so you can correct the value.
+   - 
+5. Run `mkcert -install && mkcert localhost 127.0.0.1 ::1` for locally trusted certs, then point `SSL_KEYFILE`/`SSL_CERTFILE` at the generated files. See `docs/security/tls-setup.md` for mkcert, OpenSSL and Let's Encrypt recipes.
+6. Start the HTTP API bridge: `python3 -m agents.api_server` (defaults to port `8081`).
+7. Load the `extension/` folder as an unpacked extension in Chrome.
+8. Open the extension popup (or `local-access.html`) and paste the authentication key into the **API Key** field.
+9. Test the extension by using it on an active webpage (e.g. https://www.google.com).
 
-To verify the setup manually:
-- Call `/api/interpreter/actionplan` with `curl -H "X-API-Key: <key>" …` and confirm `200`.
-- Repeat the same request without the header (or with a wrong key) and confirm a `401` with the generic “Invalid or missing API key” message.
-- From any random website console, `fetch("http://localhost:8081/api/interpreter/actionplan", { headers: { "X-API-Key": "<key>" }, …})` succeeds only if the active tab is the extension; other origins should be blocked by CORS.
+
+## Secure Deployment
+
+### Host binding & runtime modes
+- The API server now binds to `127.0.0.1` by default. Override with `VCAA_API_HOST` only if you trust the surrounding network.
+- Setting a non-localhost host requires `VCAA_ALLOW_REMOTE=true` to acknowledge the risk. Use a firewall if you must expose it.
+- `VCAA_ENV=production` enforces hardened defaults: TLS is required and insecure bindings are rejected before startup.
+- Each boot prints a security summary similar to:
+  ```
+  ============================================================
+  Vocal Web API Security Status
+  ------------------------------------------------------------
+  Bind Address : 127.0.0.1 (localhost only)
+  Port         : 8081
+  TLS Enabled  : Yes
+  Certificate  : expires 2026-01-15
+  Environment  : production
+  Remote Bind  : disabled
+  API Auth     : Required (X-API-Key)
+  ============================================================
+  ```
+
+### TLS configuration
+- Production mode refuses to start without TLS. In development, HTTP still works but logs a warning so it is not shipped by accident.
+
+### Extension awareness
+- The popup now shows a padlock/warning indicator for the current API base and exposes a **Require HTTPS connection** checkbox. Enabling it will reject HTTP-only servers.
+- The background script probes the `/health` endpoint over HTTPS; once it succeeds the extension automatically prefers HTTPS for all subsequent calls.
 
 ## Features currently in development
 1. Improved DOMMap filtering to reduce tokens.
@@ -63,12 +79,12 @@ This MVP is **not production-ready**. The following security hardening is requir
 |-------|--------|----------|
 | API authentication (JWT/API keys) | Implemented | Critical |
 | CORS origin allowlist (currently `*`) | Implemented | Critical |
-| HTTPS/TLS enforcement | Pending | Critical |
+| HTTPS/TLS enforcement | Implemented | Critical |
 | URL validation before navigation | Pending | Critical |
 | Sensitive field exclusion from DOMMap (passwords, etc.) | Pending | Critical |
 | Rate limiting on API endpoints | Pending | High |
 | Prompt injection sanitization | Pending | High |
-| Bind to localhost instead of `0.0.0.0` | Pending | High |
+| Bind to localhost instead of `0.0.0.0` | Implemented | High |
 | Minimize extension permissions | Pending | Medium |
 | Error message sanitization | Pending | Medium |
 
