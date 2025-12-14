@@ -79,8 +79,8 @@ This MVP is **not production-ready**. The following security hardening is requir
 | API authentication (JWT/API keys) | Implemented | Critical |
 | CORS origin allowlist (currently `*`) | Implemented | Critical |
 | HTTPS/TLS enforcement | Implemented | Critical |
-| URL validation before navigation | Pending | Critical |
-| Sensitive field exclusion from DOMMap (passwords, etc.) | Pending | Critical |
+| URL validation before navigation | Implemented | Critical |
+| Sensitive field exclusion from DOMMap (passwords, etc.) | Implemented | Critical |
 | Rate limiting on API endpoints | Pending | High |
 | Prompt injection sanitization | Pending | High |
 | Bind to localhost instead of `0.0.0.0` | Implemented | High |

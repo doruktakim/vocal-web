@@ -6,6 +6,15 @@
 
   // Content script: captures DOMMap and executes ExecutionPlan steps.
   const VCAA_DATA_ATTR = "data-vcaa-id";
+  const securityUtils = window.VocalWebSecurity || {};
+  const domUtils = window.VocalWebDomUtils || {};
+
+  const detectSensitiveField =
+    typeof domUtils.isSensitiveField === "function" ? domUtils.isSensitiveField : () => false;
+  const validateNavigationUrl =
+    typeof securityUtils.isValidNavigationUrl === "function"
+      ? securityUtils.isValidNavigationUrl
+      : null;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -199,6 +208,27 @@
     });
   }
 
+  function hasElementValue(el) {
+    if (!el) {
+      return false;
+    }
+    const tag = (el.tagName || "").toLowerCase();
+    if (tag === "input") {
+      const type = (el.type || "").toLowerCase();
+      if (type === "checkbox" || type === "radio") {
+        return Boolean(el.checked);
+      }
+    }
+    const value = el.value;
+    if (value === undefined || value === null) {
+      return false;
+    }
+    if (typeof value === "string") {
+      return value.length > 0;
+    }
+    return Boolean(value);
+  }
+
   function captureDomMap() {
     // Include common form controls plus grid cells (e.g., calendar dates), traversing shadow DOMs.
     const selector =
@@ -230,6 +260,10 @@
         // ignore elements that cannot be modified
       }
       const rect = el.getBoundingClientRect();
+      const elementIsSensitive = !!detectSensitiveField(el);
+      const rawValue = el.value;
+      const normalizedValue =
+        rawValue === undefined || rawValue === null || rawValue === "" ? null : rawValue;
       elements.push({
         element_id: elementId,
         tag: el.tagName.toLowerCase(),
@@ -239,7 +273,7 @@
         placeholder: el.getAttribute("placeholder"),
         role: el.getAttribute("role"),
         name: el.getAttribute("name"),
-        value: el.value || null,
+        value: elementIsSensitive ? null : normalizedValue,
         attributes: {
           id: el.id || undefined,
           class: el.className || undefined,
@@ -256,6 +290,8 @@
         enabled: !el.disabled,
         dataset: { ...el.dataset },
         score_hint: 0.0,
+        is_sensitive: elementIsSensitive,
+        has_value: hasElementValue(el),
       });
     });
 
@@ -277,7 +313,21 @@
       if (step.action_type === "navigate") {
         try {
           if (step.value) {
-            window.location.href = step.value;
+            let targetUrl = step.value;
+            if (validateNavigationUrl) {
+              const validation = validateNavigationUrl(step.value);
+              if (!validation?.valid) {
+                console.warn("[VCAA] Blocked navigation:", validation);
+                results.push({
+                  step_id: step.step_id,
+                  status: "error",
+                  error: validation?.message || "Navigation URL blocked by policy.",
+                });
+                continue;
+              }
+              targetUrl = validation.url || step.value;
+            }
+            window.location.href = targetUrl;
             results.push({
               step_id: step.step_id,
               status: "success",

@@ -89,6 +89,8 @@ DOMMap (top-level):
       "bounding_rect":{"x":0,"y":0,"width":100,"height":40},
       "visible":true,
       "enabled":true,
+      "is_sensitive":false,
+      "has_value":false,
       "dataset":{},
       "score_hint":0.0
     }
@@ -173,6 +175,8 @@ Captured attributes per element:
 - `bounding_rect` and `visible` boolean
 - `enabled` boolean
 - `dataset` (data-* fields)
+- `is_sensitive` boolean flag indicating whether the `value` was redacted
+- `has_value` boolean indicating if the element currently contains user-provided content
 
 Snapshot model:
 - Provide full snapshot at page load and diffs thereafter for performance.

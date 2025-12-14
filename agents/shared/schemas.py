@@ -38,6 +38,8 @@ class DOMElement(Model):
     enabled: bool = True
     dataset: Dict[str, Any] = None
     score_hint: float = 0.0
+    is_sensitive: bool = False
+    has_value: bool = False
 
     @validator("attributes", pre=True, always=True)
     def _default_attributes(cls, value):

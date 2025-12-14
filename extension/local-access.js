@@ -11,6 +11,11 @@ const clarificationPanel = document.getElementById("clarificationPanel");
 const clarificationHistoryContainer = document.getElementById("clarificationHistory");
 const resetClarificationButton = document.getElementById("resetClarification");
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
+const securityUtils = window.VocalWebSecurity || {};
+const validateNavigationUrl =
+  typeof securityUtils.isValidNavigationUrl === "function"
+    ? securityUtils.isValidNavigationUrl
+    : null;
 
 const SpeechRecognition =
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -427,9 +432,20 @@ const handleRedirect = (plan) => {
   if (!url) {
     return false;
   }
-  logStatus(`Redirecting to ${url}…`);
-  output.textContent += `\nRedirecting to ${url}…`;
-  window.location.href = url;
+  let targetUrl = url;
+  if (validateNavigationUrl) {
+    const validation = validateNavigationUrl(url);
+    if (!validation?.valid) {
+      const errorMessage = validation?.message || "Navigation blocked by security policy.";
+      logStatus(errorMessage);
+      output.textContent += `\n${errorMessage}`;
+      return false;
+    }
+    targetUrl = validation.url || url;
+  }
+  logStatus(`Redirecting to ${targetUrl}…`);
+  output.textContent += `\nRedirecting to ${targetUrl}…`;
+  window.location.href = targetUrl;
   return true;
 };
 
