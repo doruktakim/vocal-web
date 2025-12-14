@@ -1,5 +1,5 @@
-# AGENTS.md — VCAA Multi-Agent Architecture
-### (uAgents + ASI Cloud + Agentverse Deployment)
+# AGENTS.md — Vocal Web Multi-Agent Architecture
+### (uAgents + ASI Cloud)
 
 **Purpose:**
 Enable users to control web browsing via natural-language voice commands. The system interprets speech, reasons about page structure, and performs DOM-level actions entirely inside the browser (Observer + Execution Layer) while reasoning and orchestration occur in cloud agents (Interpreter + Navigator).
@@ -16,13 +16,11 @@ System should:
    - **destination:** London
    - **date:** 2026-01-21
 3. Trigger the search.
-4. Present results and allow further voice navigation (scroll, filter, select).
-
-This doc focuses on actionable, developer-facing details needed to implement the MVP: strict message schemas, prompt templates, Observer spec, execution semantics, error handling, testing, and a minimal dev/runbook.
+4. Allow further voice navigation (scroll, filter, select).
 
 ## Overview
 
-The Voice‑Controlled Assistive Agent (VCAA) is a multi-agent system using **uAgents** for orchestration, **ASI Cloud** for LLM reasoning, and **Agentverse** for hosting.
+Vocal Web is a multi-agent system using **uAgents** for orchestration, **ASI Cloud** for LLM reasoning.
 
 Key runtime constraint: all actual DOM operations occur inside the browser extension. Cloud agents only send/receive structured JSON messages and LLM prompts.
 
@@ -32,7 +30,6 @@ Key runtime constraint: all actual DOM operations occur inside the browser exten
 - **Interpreter Agent (uAgents)** — converts transcripts to `ActionPlan` using ASI Cloud.
 - **Navigator Agent (uAgents)** — converts `ActionPlan` + `DOMMap` to `ExecutionPlan` using ASI Cloud fuzzy matching and heuristics.
 - **ASI Cloud** — LLMs used by Interpreter & Navigator for semantic parsing and fuzzy DOM matching.
-- **Agentverse** — host for agents, secrets management, logs, and routing.
 
 The system is browser-native (no OS-level automation).
 
@@ -218,7 +215,7 @@ Store these templates in `docs/prompts/` and keep several few-shot examples for 
 
 ## Security & Secrets
 
-- Use Agentverse secret store or CI secrets for `ASI_CLOUD_API_KEY` and other credentials. Never check keys into repo.
+- Never check keys into repo.
 - Browser extension should request minimal host permissions and request optional domain permissions at runtime.
 - PII and transcripts: redact or hash user-sensitive data in logs unless explicit opt-in.
 
@@ -230,45 +227,13 @@ Store these templates in `docs/prompts/` and keep several few-shot examples for 
 
 ## Summary
 
-VCAA is built on:
+Vocal Web is built on:
 - **LLM reasoning** (ASI Cloud)  
 - **DOM awareness** (browser Observer)  
-- **Autonomous orchestration** (uAgents)  
-- **Zero server maintenance** (Agentverse)  
+- **Autonomous orchestration** (uAgents)   
 
 This enables a generalizable, voice-controlled, browser-native assistant.
 
-## Acceptance criteria (MVP)
-
-- Functional: complete the flight-search flow on at least 2 major sites with >80% success in the test matrix.
-- Robustness: clarification asked appropriately for ambiguous inputs; execution error rates <10% on validation runs.
-- Performance: plan generation latency at the agent (excluding LLM network) <2s for 95th percentile.
-
-## Testing & validation
-
-- Unit tests: Interpreter entity normalization, Navigator scoring heuristics.
-- Integration tests: Playwright/Puppeteer harness running the extension and agents with a mock ASI Cloud service.
-- E2E tests: scripted flows for search, scroll, filter, select, and ambiguous inputs.
-
-## Local dev runbook (quickstart)
-
-1. Install Node.js (18+), npm, and Chrome/Chromium.
-2. Load the `extension/` directory as an unpacked extension in Chrome (chrome://extensions).
-3. Start mock ASI Cloud for deterministic responses (see `dev/mocks/mock_asi.js`).
-4. Run agents locally:
-
-```bash
-export ASI_CLOUD_API_KEY="<mock_or_real>"
-node agents/interpreter.js
-node agents/navigator.js
-```
-
-5. Open a test page and interact via an attached test harness (Playwright) or manual voice transcript injection.
-
-## Deployment notes
-
-- Provide `Dockerfile` per agent and an `agentverse.yaml` manifest with environment variables and secret references.
-- Use CI to build images, run linters and unit tests, then deploy to Agentverse.
 
 ## Repo layout suggestion
 

@@ -1,39 +1,51 @@
-# Voice-Controlled Assistive Agent (VCAA) MVP
+# Vocal Web MVP
 
-This repo builds a voice-controlled web agent that lets users operate any website hands-free, powered by LLM intelligence it can understand user intent, execute multi-step workflows (open sites, search, click, fill fields, close widgets, submit forms), and it works on any website: Youtube, Booking.com, Skyscanner, Amazon...
+This repository implements the MVP of Vocal Web, a multi-agent system that enables users to navigate the web using voice. It uses LLMs to perform complex actions on previously unknown sites, enabling cross-website compatibility.
 
-## Reference
-- See `AGENTS.md` for the architecture overview, message schemas, prompt templates, testing guidance, and deployment/runbook details.
+This repo is currently under development. Thus, a web extension is currently implemented to test backend improvements quickly. A website that opens at start-up and continously listens for user input will be implemented at later stages. 
 
 ## Layout
 - `agents/` — interpreter and navigator agents, shared schemas, FastAPI bridge.
-- `extension/` — Chrome MV3 extension for DOMMap capture and plan execution.
+- `extension/` — Chrome extension for DOMMap capture and plan execution.
 - `docs/prompts/` — interpreter and navigator prompt templates.
-- `dev/mocks/` — mock ASI Cloud server.
-- `dev/harness/` — local demo harness hitting the HTTP API.
 
-## Environment & secrets
-
-1. **Dependencies**: install Python 3.11+ (for the agents) and Node.js 18+/npm (for the harness/extension tooling), and have Chrome/Chromium ready for the unpacked extension.
-2. **ASI Cloud**: set `ASI_CLOUD_API_KEY` and `ASI_CLOUD_API_URL` so the interpreter/navigator can reach the LLM service. Without those variables the agents fall back to deterministic heuristics.
+## Quickstart
+1. Install Python deps: `pip install -r requirements.txt`.
+2. Configure API key so the interpreter/navigator can reach the LLM. Without those variables the agents fall back to deterministic heuristics.
 ```bash
    export ASI_CLOUD_API_URL="https://inference.asicloud.cudos.org/v1"
    export ASI_CLOUD_API_KEY=<your_api_key>
    export ASI_CLOUD_MODEL="asi1-mini"
    ```
-3. **Google STT**: store your service-account JSON outside the repo and point the bridge at it via `export GOOGLE_APPLICATION_CREDENTIALS="/path/to/gc-stt.json"`.
-4. **Ports**: the HTTP bridge defaults to `8081` and the extension popup uses that. Update the API base URL in the popup if you change the port.
+3. Configure Google Speech-to-Text API:
+   - Drop your service-account JSON somewhere outside the repo (e.g., `/Users/aliyigituzun/Desktop/VCAA Keys/gc-stt.json`).
+   - Point the agents/bridge at it with `export GOOGLE_APPLICATION_CREDENTIALS="/Users/aliyigituzun/Desktop/VCAA Keys/gc-stt.json"`.
+   - The HTTP bridge now exposes `/api/stt/transcribe`, which accepts `audio_base64`, `sample_rate_hertz`, `encoding`, and `language_code` and returns the transcript JSON.
+4. Start the HTTP API bridge: `python -m agents.api_server` (defaults to port `8081`).
+5. Load the `extension/` folder as an unpacked extension in Chrome. Open the popup, set API base (default `http://localhost:8081`).
+6. Test the extension by using it on an active webpage (e.g. https://www.google.com).
 
-## Quickstart
-1. Install Python deps: `pip install -r requirements.txt`.
-2. Start the HTTP API bridge: `python -m agents.api_server`.
-3. Load the `extension/` folder as an unpacked extension in Chrome. Open the popup, set API base (default `http://localhost:8081`), and click **Run Demo** with an active flight search page.
+## Features currently in development
+1. Improved DOMMap filtering to reduce tokens.
+2. Implementing agent memory for frequently used websites to avoid extensive API calls.
+3. Extension-side shortcuts for primitive actions (scroll/back) so those voice commands execute instantly without hitting the interpreter/navigator HTTP APIs.
+4. Security improvements- see below.
 
-### Local access page
-Open `extension/local-access.html` for an accessible, keyboard-friendly front end. You can serve the repo root with `python -m http.server 8000` and visit either `http://localhost:8000/local-access.html` (auto-redirects) or `http://localhost:8000/extension/local-access.html`. For the full interpreter → navigator → execution flow load the page through the unpacked extension by navigating to `chrome-extension://<your-extension-id>/local-access.html`. Inside the extension the clarification dialog now uses text-to-speech, waits for speech to finish before listening, chains answers back into the transcript, logs the last clarifications, and exposes a reset button; the UI also displays any clarifications the navigator emits after the interpreter completes. Otherwise the page falls back to calling `/api/interpreter/actionplan` directly. Set the API base to `http://localhost:8081` (or your bridge), dictate or paste a prompt, and tap **Run demo**.
+## Security Notice (Pre-Production)
 
-## Notes
-- All messages include `schema_version` and `id` fields per `AGENTS.md`.
-- Agents fall back to deterministic heuristics when `ASI_CLOUD_API_KEY`/`ASI_CLOUD_API_URL` are not set.
-- DOM operations occur only inside the extension; agents exchange JSON over HTTP/uAgents.
-- The extension background now treats clarifications differently: reasons that describe missing user input (`missing_query`, `ambiguous_destination`, etc.) still surface to you, while navigator requests about DOM elements automatically trigger fallback clicks, and the final DOM plus execution plan/result are re-sent to the navigator so it can validate the outcome (and rerun steps if needed) before the UI reports completion.
+This MVP is **not production-ready**. The following security hardening is required before deployment:
+
+| Issue | Status | Priority |
+|-------|--------|----------|
+| API authentication (JWT/API keys) | Pending | Critical |
+| CORS origin allowlist (currently `*`) | Pending | Critical |
+| HTTPS/TLS enforcement | Pending | Critical |
+| URL validation before navigation | Pending | Critical |
+| Sensitive field exclusion from DOMMap (passwords, etc.) | Pending | Critical |
+| Rate limiting on API endpoints | Pending | High |
+| Prompt injection sanitization | Pending | High |
+| Bind to localhost instead of `0.0.0.0` | Pending | High |
+| Minimize extension permissions | Pending | Medium |
+| Error message sanitization | Pending | Medium |
+
+**Do not expose the API server to the public internet in its current state.**
