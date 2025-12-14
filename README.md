@@ -29,8 +29,7 @@ This repo is currently under development. Thus, a web extension is currently imp
    ```bash
    export VCAA_API_KEY="paste_the_key_here"
    ```
-   - 
-5. Run `mkcert -install && mkcert localhost 127.0.0.1 ::1` for locally trusted certs, then point `SSL_KEYFILE`/`SSL_CERTFILE` at the generated files. See `docs/security/tls-setup.md` for mkcert, OpenSSL and Let's Encrypt recipes.
+5. Run `mkcert -install && mkcert localhost 127.0.0.1 ::1` for locally trusted certificates, then point `SSL_KEYFILE`/`SSL_CERTFILE` at the generated files. See `docs/security/tls-setup.md` for more information.
 6. Start the HTTP API bridge: `python3 -m agents.api_server` (defaults to port `8081`).
 7. Load the `extension/` folder as an unpacked extension in Chrome.
 8. Open the extension popup (or `local-access.html`) and paste the authentication key into the **API Key** field.
