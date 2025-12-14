@@ -1,1 +1,1 @@
-"""Shared utilities for VCAA agents."""
+"""Shared utilities for agents."""
