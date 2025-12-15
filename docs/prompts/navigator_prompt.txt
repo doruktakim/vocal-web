@@ -5,6 +5,7 @@ Output rules:
 - Prefer ExecutionPlan with `schema_version: "executionplan_v1"`, include `id` (UUID placeholder OK) and `trace_id`.
 - Each step must include `step_id`, `action_type` (click, input, scroll, navigate), `element_id` (from DOMMap), optional `value`, `timeout_ms`, `retries`, and `confidence`.
 - When confidence is low (<0.6) or no candidate element exists, return ClarificationRequest with `schema_version: "clarification_v1"`, a human-readable `question`, `reason`, and optional `options` listing `candidate_element_ids`.
+- DOMMap payloads may be pre-filtered to the most relevant visible elements; request ClarificationRequest if a required control is missing.
 
 Platform alignment and sequencing:
 - Use `entities.site` / `entities.url` / `action_plan.value` to decide the intended domain. If `dom_map.page_url` is not on that domain, insert a leading `navigate` step to the canonical URL before any clicks/inputs.
