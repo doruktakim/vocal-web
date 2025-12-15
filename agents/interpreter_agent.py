@@ -84,7 +84,7 @@ async def build_action_plan_from_transcript(
                 if flight_site_context and has_date_remote:
                     plan.action = "update_flight_dates"
                     plan.target = "flight_results_url"
-                    plan.value = merged.get("url") or page_url
+                    plan.value = page_url or merged.get("url")
                 plan.entities = merged or None
                 return plan
         else:
@@ -176,7 +176,7 @@ async def build_action_plan_from_transcript(
             trace_id=msg.trace_id,
             action="update_flight_dates",
             target="flight_results_url",
-            value=entities.get("url") or page_url,
+            value=page_url or entities.get("url"),
             entities=entities,
             confidence=0.86,
         )

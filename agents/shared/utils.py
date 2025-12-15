@@ -84,9 +84,9 @@ def extract_entities_from_transcript(transcript: str) -> dict:
     for site in known_sites:
         if site in lower:
             entities["site"] = site
-            url = map_site_to_url(site)
-            if url:
-                entities["url"] = url
+            # Avoid forcing a homepage URL when the actual page_url should take precedence
+            # URL derivation will happen later based on context if needed.
+            break
 
     domain_match = re.search(
         r"\b([a-z0-9.-]+\.(?:com|net|org|io|ai|co\.uk|app|travel|tv))\b", lower
@@ -1224,7 +1224,13 @@ def build_execution_plan_for_flight_date_update(
     action_plan: ActionPlan, dom_map: DOMMap
 ) -> Tuple[Optional[ExecutionPlan], Optional[ClarificationRequest]]:
     entities = action_plan.entities or {}
+    # Prefer the current DOM map URL because it carries the active route parameters
     base_url = dom_map.page_url or action_plan.value or entities.get("url")
+    if base_url and dom_map.page_url:
+        # Detect cases where the base_url is a generic homepage (no YYMMDD segments) and
+        # override with the DOM map URL that references the actual itinerary.
+        if not re.search(r"/\d{6}/", base_url) and re.search(r"/\d{6}/", dom_map.page_url):
+            base_url = dom_map.page_url
     outbound_iso = entities.get("date_start") or entities.get("date")
     return_iso = entities.get("date_end")
 
