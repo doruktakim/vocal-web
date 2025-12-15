@@ -13,7 +13,7 @@ This repo is currently under development. Thus, a web extension is currently imp
 
 ## Quickstart
 1. Install Python deps: `pip install -r requirements.txt`.
-2. Configure LLM API key. The agents fall back to deterministic heuristics without a valid API key.
+2. Configure LLM API key. The agents fall back to deterministic heuristics without a valid key. Select asi1-mini as the model, which is currently free and performs great!
 ```bash
    export ASI_CLOUD_API_URL="https://inference.asicloud.cudos.org/v1"
    export ASI_CLOUD_API_KEY=<your_api_key>
