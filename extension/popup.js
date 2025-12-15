@@ -391,6 +391,16 @@ function formatResponse(resp) {
   }
 
   if (resp.status === "completed") {
+    // Fast path response - instant command execution
+    if (resp.fastPath && resp.action) {
+      const actionType = resp.action.type;
+      const detail = resp.action.direction || resp.action.position || "";
+      const duration = resp.execResult?.duration_ms || 0;
+      const actionLabel = detail ? `${actionType} ${detail}` : actionType;
+      return `Instant: ${actionLabel} (${duration}ms)`;
+    }
+
+    // Full pipeline response
     const lines = [];
     if (resp.actionPlan) {
       const action = resp.actionPlan.action || "unknown action";

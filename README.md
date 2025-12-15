@@ -69,5 +69,7 @@ This repo is currently under development. Thus, a web extension is currently imp
 ## Features currently in development
 1. Improved DOMMap filtering to reduce tokens.
 2. Implementing agent memory for frequently used websites to avoid extensive API calls.
-3. Extension-side shortcuts for primitive actions (scroll/back) so those voice commands execute instantly without hitting the interpreter/navigator HTTP APIs.
-4. Security improvements.
+3. Security improvements.
+
+## Recently implemented
+- **Instant commands**: Extension-side shortcuts for basic actions (scroll up/down, back, forward, refresh, scroll to top/bottom) execute instantly (~50-100ms) without hitting the interpreter/navigator HTTP APIs.

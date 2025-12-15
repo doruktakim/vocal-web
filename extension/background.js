@@ -1,6 +1,109 @@
 const DEFAULT_API_BASE = "http://localhost:8081";
 const CONTENT_SCRIPT_FILE = "content.js";
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
+
+// ============================================================================
+// Fast Command Detection (inline for service worker compatibility)
+// ============================================================================
+
+const FAST_COMMAND_PATTERNS = [
+  // Scroll down commands
+  {
+    patterns: [
+      /\b(scroll|page|go)\s*(down|lower)\b/i,
+      /\bdown\s*(a\s*)?(page|screen)?\b/i,
+      /\bscroll\s*down\b/i,
+    ],
+    action: { type: "scroll", direction: "down" }
+  },
+  // Scroll up commands
+  {
+    patterns: [
+      /\b(scroll|page|go)\s*(up|higher)\b/i,
+      /\bup\s*(a\s*)?(page|screen)?\b/i,
+      /\bscroll\s*up\b/i,
+    ],
+    action: { type: "scroll", direction: "up" }
+  },
+  // History back navigation
+  {
+    patterns: [
+      /\b(go\s*)?back\b/i,
+      /\bprevious\s*(page)?\b/i,
+      /\breturn\b/i,
+      /\bgo\s+to\s+(the\s+)?previous\s+(page)?\b/i,
+    ],
+    action: { type: "history_back" }
+  },
+  // History forward navigation
+  {
+    patterns: [
+      /\b(go\s*)?forward\b/i,
+      /\bnext\s*(page)?\b/i,
+      /\bgo\s+to\s+(the\s+)?next\s+(page)?\b/i,
+    ],
+    action: { type: "history_forward" }
+  },
+  // Page refresh
+  {
+    patterns: [
+      /\b(refresh|reload)\s*(the\s*)?(page|this)?\b/i,
+      /\brefresh\b/i,
+      /\breload\b/i,
+    ],
+    action: { type: "reload" }
+  },
+  // Scroll to top
+  {
+    patterns: [
+      /\b(scroll|go)\s*(to\s*)?(the\s*)?(top|beginning|start)\b/i,
+      /\btop\s*of\s*(the\s*)?page\b/i,
+      /\bgo\s+to\s+(the\s+)?top\b/i,
+      /\bscroll\s+to\s+top\b/i,
+    ],
+    action: { type: "scroll_to", position: "top" }
+  },
+  // Scroll to bottom
+  {
+    patterns: [
+      /\b(scroll|go)\s*(to\s*)?(the\s*)?(bottom|end)\b/i,
+      /\bbottom\s*of\s*(the\s*)?page\b/i,
+      /\bgo\s+to\s+(the\s+)?bottom\b/i,
+      /\bscroll\s+to\s+bottom\b/i,
+    ],
+    action: { type: "scroll_to", position: "bottom" }
+  },
+];
+
+const FAST_COMMAND_KEYWORDS = [
+  'scroll', 'up', 'down', 'back', 'forward',
+  'refresh', 'reload', 'top', 'bottom', 'page',
+  'previous', 'next', 'return'
+];
+
+function isProbablyFastCommand(transcript) {
+  if (!transcript) return false;
+  const lower = transcript.toLowerCase();
+  if (lower.split(/\s+/).length > 6) return false;
+  return FAST_COMMAND_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+function matchFastCommand(transcript) {
+  if (!transcript) return null;
+  const normalized = transcript.toLowerCase().trim();
+  if (!isProbablyFastCommand(normalized)) return null;
+
+  for (const command of FAST_COMMAND_PATTERNS) {
+    for (const pattern of command.patterns) {
+      if (pattern.test(normalized)) {
+        return { ...command.action };
+      }
+    }
+  }
+  return null;
+}
+
+// ============================================================================
 const STORAGE_KEYS = {
   API_BASE: "vcaaApiBase",
   API_KEY: "vcaaApiKey",
@@ -337,6 +440,25 @@ async function runDemoFlowInternal(
   clarificationResponse,
   clarificationHistory = []
 ) {
+  // FAST PATH: Check for simple commands first (only on fresh commands)
+  if (!clarificationResponse) {
+    const fastCommand = matchFastCommand(transcript);
+    if (fastCommand) {
+      console.log("[VCAA] Fast path: executing", fastCommand.type);
+      const result = await sendMessageWithInjection(tabId, {
+        type: "fast-command",
+        action: fastCommand
+      });
+      return {
+        status: "completed",
+        fastPath: true,
+        action: fastCommand,
+        execResult: result
+      };
+    }
+  }
+
+  // FULL PIPELINE: Continue with normal flow for complex commands
   const { apiBase } = await resolveApiConfig();
   const traceId = crypto.randomUUID();
   let domMap = await collectDomMap(tabId, traceId);

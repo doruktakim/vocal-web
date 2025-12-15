@@ -451,6 +451,66 @@
     };
   }
 
+  /**
+   * Execute a fast command directly without going through the full pipeline.
+   * @param {object} action - The action to execute
+   * @returns {object} - Result of the execution
+   */
+  function executeFastCommand(action) {
+    const start = performance.now();
+
+    try {
+      switch (action.type) {
+        case "scroll": {
+          const delta = action.direction === "up"
+            ? -window.innerHeight * 0.8
+            : window.innerHeight * 0.8;
+          window.scrollBy({ top: delta, behavior: "smooth" });
+          break;
+        }
+
+        case "history_back":
+          window.history.back();
+          break;
+
+        case "history_forward":
+          window.history.forward();
+          break;
+
+        case "reload":
+          window.location.reload();
+          break;
+
+        case "scroll_to": {
+          const target = action.position === "top" ? 0 : document.body.scrollHeight;
+          window.scrollTo({ top: target, behavior: "smooth" });
+          break;
+        }
+
+        default:
+          return {
+            status: "error",
+            error: `Unknown fast command: ${action.type}`,
+            duration_ms: Math.round(performance.now() - start)
+          };
+      }
+
+      return {
+        status: "success",
+        action: action.type,
+        direction: action.direction || null,
+        position: action.position || null,
+        duration_ms: Math.round(performance.now() - start)
+      };
+    } catch (err) {
+      return {
+        status: "error",
+        error: String(err),
+        duration_ms: Math.round(performance.now() - start)
+      };
+    }
+  }
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "collect-dommap") {
       sendResponse(captureDomMap());
@@ -458,6 +518,10 @@
     }
     if (message?.type === "execute-plan") {
       executePlan(message.plan).then(sendResponse);
+      return true;
+    }
+    if (message?.type === "fast-command") {
+      sendResponse(executeFastCommand(message.action));
       return true;
     }
     return false;
