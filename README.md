@@ -1,4 +1,4 @@
-# Vocal Web MVP
+# Vocal Web
 
 Presentation & Demo [here](https://youtu.be/Ms-CEfp3YjA).
 
