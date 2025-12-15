@@ -18,6 +18,69 @@
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const normalizeText = (value) => (value || "").toLowerCase().trim();
+
+  function levenshteinDistance(a, b) {
+    if (!a && !b) return 0;
+    if (!a) return b.length;
+    if (!b) return a.length;
+    const rows = a.length + 1;
+    const cols = b.length + 1;
+    const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
+    for (let i = 0; i < rows; i++) {
+      dp[i][0] = i;
+    }
+    for (let j = 0; j < cols; j++) {
+      dp[0][j] = j;
+    }
+    for (let i = 1; i < rows; i++) {
+      for (let j = 1; j < cols; j++) {
+        if (a[i - 1] === b[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1];
+        } else {
+          dp[i][j] = Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]) + 1;
+        }
+      }
+    }
+    return dp[a.length][b.length];
+  }
+
+  function stringSimilarity(a, b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    const distance = levenshteinDistance(a, b);
+    const maxLen = Math.max(a.length, b.length);
+    if (!maxLen) return 1;
+    return 1 - distance / maxLen;
+  }
+
+  function countUnrelatedCitySegments(text, normalizedTerm) {
+    if (!text) return 0;
+    const separators = [" - ", " to ", " from ", "→", "←", ",", "–", "—"];
+    let segments = [text];
+    separators.forEach((sep) => {
+      segments = segments.flatMap((segment) => segment.split(sep));
+    });
+    const ignoreWords = ["airport", "anywhere", "everywhere"];
+    return segments.reduce((count, segment) => {
+      const trimmed = segment.trim();
+      if (!trimmed || trimmed.length < 3) return count;
+      const lower = trimmed.toLowerCase();
+      if (
+        lower.includes(normalizedTerm) ||
+        normalizedTerm.includes(lower) ||
+        ignoreWords.some((word) => lower.includes(word)) ||
+        /\d/.test(lower)
+      ) {
+        return count;
+      }
+      if (!/[a-z]/i.test(trimmed)) {
+        return count;
+      }
+      return count + 1;
+    }, 0);
+  }
+
   function isVisible(el) {
     const rect = el.getBoundingClientRect();
     const style = window.getComputedStyle(el);
@@ -29,10 +92,11 @@
     );
   }
 
-  function pickAndClickOption(value) {
-    if (!value) return false;
-    const lower = value.toLowerCase().trim();
-    if (!lower) return false;
+  function pickAndClickOption(value, { previewOnly = false } = {}) {
+    const lower = normalizeText(value);
+    if (!lower) {
+      return { picked: false, matchCount: 0 };
+    }
     const optionCandidates = Array.from(
       document.querySelectorAll(
         [
@@ -49,26 +113,84 @@
       )
     );
     let best = null;
-    let bestScore = 0;
+    let bestScore = -Infinity;
+    let matchCount = 0;
     optionCandidates.forEach((el) => {
       if (!isVisible(el)) return;
-      const text =
-        (el.innerText || el.textContent || "").toLowerCase().trim() ||
-        (el.getAttribute("aria-label") || "").toLowerCase();
-      if (!text) return;
-      if (text.includes(lower) || lower.includes(text.split("\n")[0].trim())) {
-        const score = text.length ? lower.length / text.length : 0;
-        if (score > bestScore) {
-          best = el;
-          bestScore = score;
-        }
+      const rawText = (el.innerText || el.textContent || el.getAttribute("aria-label") || "").trim();
+      if (!rawText) return;
+      const primaryText = rawText.split("\n")[0].trim();
+      const normalizedText = normalizeText(primaryText);
+      if (!normalizedText) return;
+      const similarity = stringSimilarity(lower, normalizedText);
+      const containsTerm =
+        normalizedText.includes(lower) || lower.includes(normalizedText) || similarity >= 0.65;
+      if (!containsTerm) {
+        return;
+      }
+      matchCount += 1;
+      let score = similarity * 0.6;
+      if (normalizedText === lower) {
+        score += 0.5;
+      } else if (normalizedText.startsWith(lower)) {
+        score += 0.35;
+      } else if (normalizedText.includes(lower)) {
+        score += 0.2;
+      }
+      const unrelatedSegments = countUnrelatedCitySegments(rawText, lower);
+      if (unrelatedSegments) {
+        score -= Math.min(0.6, unrelatedSegments * 0.2);
+      }
+      const startIndex = normalizedText.indexOf(lower);
+      if (startIndex > 0) {
+        score -= Math.min(0.15, startIndex / 100);
+      }
+      if (normalizedText.length > lower.length) {
+        score -= Math.min(0.2, (normalizedText.length - lower.length) / 200);
+      }
+      if (score > bestScore && score > 0) {
+        best = el;
+        bestScore = score;
       }
     });
     if (best) {
-      best.click();
-      return true;
+      if (!previewOnly) {
+        best.scrollIntoView({ block: "nearest" });
+        best.click();
+      }
+      return { picked: !previewOnly, matchCount };
     }
-    return false;
+    return { picked: false, matchCount };
+  }
+
+  async function pickOptionWithRetries(value, options = {}) {
+    const maxAttempts = options.maxAttempts || 5;
+    const maxMatchWaitMs = options.maxMatchWaitMs || 4000;
+    let attempts = 0;
+    let delay = options.initialDelay || 300;
+    const maxDelay = options.maxDelay || 1500;
+    let totalWaitForMatch = 0;
+    let sawMatch = false;
+
+    while (attempts < maxAttempts || (!sawMatch && totalWaitForMatch < maxMatchWaitMs)) {
+      const { picked, matchCount } = pickAndClickOption(value);
+      if (matchCount > 0) {
+        sawMatch = true;
+      }
+      if (picked) {
+        return { clicked: true, sawMatch: true };
+      }
+      attempts += 1;
+      const shouldContinue =
+        attempts < maxAttempts || (!sawMatch && totalWaitForMatch < maxMatchWaitMs);
+      if (!shouldContinue) {
+        break;
+      }
+      await sleep(delay);
+      totalWaitForMatch += delay;
+      delay = Math.min(maxDelay, Math.round(delay * 1.5));
+    }
+    return { clicked: false, sawMatch };
   }
 
   function looksLikeDate(value) {
@@ -206,6 +328,52 @@
       el.dispatchEvent(new KeyboardEvent("keydown", opts));
       el.dispatchEvent(new KeyboardEvent("keyup", opts));
     });
+  }
+
+  function inputMatchesExpectation(inputEl, expectedValue) {
+    if (!inputEl) return false;
+    const expected = normalizeText(expectedValue);
+    if (!expected) return true;
+    const actual = normalizeText(inputEl.value || inputEl.textContent || "");
+    if (!actual) return false;
+    return actual.includes(expected) || expected.includes(actual);
+  }
+
+  function resetInputValue(inputEl, value) {
+    if (!inputEl) return;
+    inputEl.focus();
+    if (typeof inputEl.select === "function") {
+      inputEl.select();
+    } else if (typeof inputEl.setSelectionRange === "function") {
+      const length = (inputEl.value || "").length;
+      inputEl.setSelectionRange(0, length);
+    }
+    inputEl.value = value || "";
+    inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+    inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function ensureAutocompleteSelection(inputEl, value) {
+    const expected = normalizeText(value);
+    if (!inputEl || !expected) {
+      return true;
+    }
+    const maxValidationAttempts = 2;
+    for (let attempt = 0; attempt < maxValidationAttempts; attempt++) {
+      const { clicked, sawMatch } = await pickOptionWithRetries(value);
+      if (!clicked && !sawMatch) {
+        pressKeys(inputEl, ["ArrowDown", "Enter"]);
+      }
+      await sleep(300);
+      if (inputMatchesExpectation(inputEl, value)) {
+        return true;
+      }
+      if (attempt < maxValidationAttempts - 1) {
+        resetInputValue(inputEl, value);
+        await sleep(200);
+      }
+    }
+    return inputMatchesExpectation(inputEl, value);
   }
 
   function hasElementValue(el) {
@@ -410,17 +578,18 @@
           el.value = step.value || "";
           el.dispatchEvent(new Event("input", { bubbles: true }));
           el.dispatchEvent(new Event("change", { bubbles: true }));
-          // Give time for suggestion lists to appear, then pick the best-matching option.
-          await sleep(300);
-          let picked = false;
+          // Give time for suggestion lists to appear, then pick and validate the best match.
+          let selectionValidated = true;
           if (isDate) {
-            picked = await clickDateWithNavigation(step.value || "");
+            const pickedDate = await clickDateWithNavigation(step.value || "");
+            if (!pickedDate) {
+              pressKeys(el, ["ArrowDown", "Enter"]);
+            }
           } else {
-            picked = pickAndClickOption(step.value || "");
+            selectionValidated = await ensureAutocompleteSelection(el, step.value || "");
           }
-          if (!picked) {
-            // Fallback: ArrowDown+Enter to select the first suggestion.
-            pressKeys(el, ["ArrowDown", "Enter"]);
+          if (!selectionValidated) {
+            throw new Error(`Failed to confirm autocomplete selection for "${step.value || ""}".`);
           }
         } else if (step.action_type === "click") {
           el.scrollIntoView({ block: "center" });
