@@ -2,7 +2,7 @@
 
 Presentation & Demo [here](https://youtu.be/Ms-CEfp3YjA).
 
-This repository implements the MVP of Vocal Web, a multi-agent system that enables users to navigate the web using voice. It uses LLMs to perform complex actions on previously unknown sites, enabling cross-website compatibility.
+This repository implements the MVP of Vocal Web, a multi-agent system that enables users to navigate the web using voice. It leverages LLMs for complex tasks on previously unknown sites, enabling cross-website compatibility.
 
 This repo is currently under development. Thus, a web extension is currently implemented to test backend improvements quickly. A website that opens at start-up and continously listens for user input will be implemented at later stages. 
 
@@ -38,12 +38,12 @@ This repo is currently under development. Thus, a web extension is currently imp
 9. Test the extension by using it on an active webpage (e.g. https://www.google.com).
 
 
-## Secure Deployment
+## Security
 
 ### Host binding & runtime modes
 - The API server now binds to `127.0.0.1` by default. Override with `VCAA_API_HOST` only if you trust the surrounding network.
 - Setting a non-localhost host requires `VCAA_ALLOW_REMOTE=true` to acknowledge the risk. Use a firewall if you must expose it.
-- `VCAA_ENV=production` enforces hardened defaults: TLS is required and insecure bindings are rejected before startup.
+- Production mode refuses to start without TLS. 
 - Each boot prints a security summary similar to:
   ```
   ============================================================
@@ -59,17 +59,15 @@ This repo is currently under development. Thus, a web extension is currently imp
   ============================================================
   ```
 
-### TLS configuration
-- Production mode refuses to start without TLS. In development, HTTP still works but logs a warning so it is not shipped by accident.
-
-### Extension awareness
+### HTTPS Connection
 - The popup now shows a padlock/warning indicator for the current API base and exposes a **Require HTTPS connection** checkbox. Enabling it will reject HTTP-only servers.
 - The background script probes the `/health` endpoint over HTTPS; once it succeeds the extension automatically prefers HTTPS for all subsequent calls.
 
 ## Features currently in development
-1. Improved DOMMap filtering to reduce tokens.
+1. Improving basic heuristics to reduce LLM dependency significantly: Aiming for a significant improvement in speed without losing performance. LLMs will still be leveraged for very complex tasks.
 2. Implementing agent memory for frequently used websites to avoid extensive API calls.
 3. Security improvements.
 
 ## Recently implemented
 - **Instant commands**: Extension-side shortcuts for basic actions (scroll up/down, back, forward, refresh, scroll to top/bottom) execute instantly (~50-100ms) without hitting the interpreter/navigator HTTP APIs.
+- **Improved DOMMap filtering to reduce tokens**: Better semantic matching, reduced max number of elements sent. 
