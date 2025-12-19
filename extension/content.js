@@ -16,6 +16,11 @@
       ? securityUtils.isValidNavigationUrl
       : null;
 
+  // Recording state - only tracks if listeners are attached
+  // Actual session data is stored in background.js to persist across navigations
+  let vcaaRecordingActive = false;
+  let vcaaLastInputElementId = null; // For debouncing input events
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const normalizeText = (value) => (value || "").toLowerCase().trim();
@@ -474,6 +479,278 @@
     };
   }
 
+  // Filter DOMMAP to match what navigator sees (replicates _trim_dom_map from asi_client.py)
+  function filterDomMapForRecording(domMap) {
+    const MAX_ELEMENTS = 120;
+    const TEXT_LIMIT = 140;
+
+    const elements = domMap.elements || [];
+
+    // Sort: visible elements first (by y position), then remainder
+    const isVisibleEl = (el) => el.visible && el.bounding_rect?.width > 0 && el.bounding_rect?.height > 0;
+    const visibleSorted = elements.filter(isVisibleEl).sort((a, b) =>
+      (a.bounding_rect?.y || Infinity) - (b.bounding_rect?.y || Infinity)
+    );
+    const visibleIds = new Set(visibleSorted.map(el => el.element_id));
+    const remainder = elements.filter(el => !visibleIds.has(el.element_id));
+    const prioritized = [...visibleSorted, ...remainder].slice(0, MAX_ELEMENTS);
+
+    // Trim each element
+    const trimmed = prioritized.map(el => {
+      const trimmedEl = {
+        element_id: el.element_id,
+        tag: el.tag,
+        visible: el.visible,
+        enabled: el.enabled
+      };
+
+      // Add type for input/select
+      if (["input", "select"].includes(el.tag) && el.type) {
+        trimmedEl.type = el.type;
+      }
+
+      // Add text fields (truncated)
+      ["text", "aria_label", "placeholder", "name", "value", "role"].forEach(field => {
+        if (el[field]) {
+          trimmedEl[field] = String(el[field]).slice(0, TEXT_LIMIT).trim();
+        }
+      });
+
+      // Add y position only
+      if (el.bounding_rect?.y != null) {
+        trimmedEl.bounding_rect = { y: el.bounding_rect.y };
+      }
+
+      // Trim attributes
+      if (el.attributes) {
+        const attrs = { ...el.attributes };
+        if (typeof attrs.class === "string" && attrs.class.length > 60) {
+          attrs.class = attrs.class.slice(0, 60);
+        }
+        const filtered = Object.fromEntries(
+          Object.entries(attrs).filter(([_, v]) => v != null && v !== "")
+        );
+        if (Object.keys(filtered).length) trimmedEl.attributes = filtered;
+      }
+
+      // Trim dataset
+      if (el.dataset) {
+        const filtered = Object.fromEntries(
+          Object.entries(el.dataset).filter(([_, v]) => v != null && v !== "")
+        );
+        if (Object.keys(filtered).length) trimmedEl.dataset = filtered;
+      }
+
+      return trimmedEl;
+    });
+
+    return {
+      ...domMap,
+      elements: trimmed
+    };
+  }
+
+  // Get element details for recording (always captures full info regardless of filtering)
+  function getElementDetailsForRecording(el) {
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return {
+      tag: el.tagName?.toLowerCase() || null,
+      text: (el.innerText || el.textContent || "").trim().slice(0, 120),
+      ariaLabel: el.getAttribute("aria-label"),
+      placeholder: el.getAttribute("placeholder"),
+      role: el.getAttribute("role"),
+      type: el.type || null,
+      name: el.getAttribute("name"),
+      id: el.id || null,
+      className: typeof el.className === "string" ? el.className : null,
+      boundingRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    };
+  }
+
+  // Generate a CSS selector for an element (for fallback identification)
+  function generateSelectorForRecording(el) {
+    if (!el) return null;
+    if (el.id) return `#${el.id}`;
+
+    const tag = el.tagName?.toLowerCase() || "unknown";
+    const classes = typeof el.className === "string" && el.className
+      ? `.${el.className.split(" ").filter(Boolean).join(".")}`
+      : "";
+    const name = el.name ? `[name="${el.name}"]` : "";
+
+    return `${tag}${classes}${name}`.slice(0, 200);
+  }
+
+  // Recording event handlers - send actions to background script
+  function handleRecordedClick(event) {
+    if (!vcaaRecordingActive) return;
+    console.debug("[VCAA] Recording click event");
+
+    const el = event.target;
+
+    // First, capture the full DOM and tag all elements
+    const fullDomMap = captureDomMap();
+
+    // Now get the element's ID (assigned by captureDomMap)
+    const elementId = el.getAttribute(VCAA_DATA_ATTR);
+
+    // Create filtered version (what navigator would see)
+    const filteredDomMap = filterDomMapForRecording(fullDomMap);
+
+    // Check if clicked element is in the filtered set
+    const filteredElementIds = new Set(filteredDomMap.elements.map(e => e.element_id));
+    const elementInFiltered = elementId ? filteredElementIds.has(elementId) : false;
+
+    // Reset input debounce tracker on click
+    vcaaLastInputElementId = null;
+
+    // Send action to background
+    chrome.runtime.sendMessage({
+      type: "vcaa-record-action",
+      action: {
+        timestamp: new Date().toISOString(),
+        filteredDomMap,
+        elementInFilteredDomMap: elementInFiltered,
+        action: {
+          type: "click",
+          elementId: elementId,
+          elementSelector: generateSelectorForRecording(el),
+          elementDetails: getElementDetailsForRecording(el),
+          coordinates: { x: event.clientX, y: event.clientY }
+        },
+        postUrl: window.location.href
+      }
+    });
+  }
+
+  function handleRecordedInput(event) {
+    if (!vcaaRecordingActive) return;
+    console.debug("[VCAA] Recording input event");
+
+    const el = event.target;
+
+    // Capture full DOM first (tags elements)
+    const fullDomMap = captureDomMap();
+    const elementId = el.getAttribute(VCAA_DATA_ATTR);
+    const filteredDomMap = filterDomMapForRecording(fullDomMap);
+    const filteredElementIds = new Set(filteredDomMap.elements.map(e => e.element_id));
+    const elementInFiltered = elementId ? filteredElementIds.has(elementId) : false;
+
+    // Debounce: if same element as last input, update instead of creating new action
+    if (vcaaLastInputElementId === elementId && elementId) {
+      chrome.runtime.sendMessage({
+        type: "vcaa-update-last-action",
+        elementId: elementId,
+        value: el.value,
+        intermediateState: {
+          timestamp: new Date().toISOString(),
+          filteredDomMap,
+          currentValue: el.value
+        }
+      });
+      return;
+    }
+
+    // New input element - record as new action
+    vcaaLastInputElementId = elementId;
+
+    chrome.runtime.sendMessage({
+      type: "vcaa-record-action",
+      action: {
+        timestamp: new Date().toISOString(),
+        filteredDomMap,
+        elementInFilteredDomMap: elementInFiltered,
+        intermediateStates: [],
+        action: {
+          type: "input",
+          elementId: elementId,
+          elementSelector: generateSelectorForRecording(el),
+          elementDetails: getElementDetailsForRecording(el),
+          value: el.value
+        },
+        postUrl: window.location.href
+      }
+    });
+  }
+
+  function handleRecordedChange(event) {
+    if (!vcaaRecordingActive) return;
+
+    const el = event.target;
+    if (el.tagName?.toLowerCase() !== "select") return;
+
+    const fullDomMap = captureDomMap();
+    const elementId = el.getAttribute(VCAA_DATA_ATTR);
+    const filteredDomMap = filterDomMapForRecording(fullDomMap);
+    const filteredElementIds = new Set(filteredDomMap.elements.map(e => e.element_id));
+    const elementInFiltered = elementId ? filteredElementIds.has(elementId) : false;
+
+    chrome.runtime.sendMessage({
+      type: "vcaa-record-action",
+      action: {
+        timestamp: new Date().toISOString(),
+        filteredDomMap,
+        elementInFilteredDomMap: elementInFiltered,
+        action: {
+          type: "select",
+          elementId: elementId,
+          elementSelector: generateSelectorForRecording(el),
+          elementDetails: getElementDetailsForRecording(el),
+          value: el.value,
+          selectedText: el.options[el.selectedIndex]?.text
+        },
+        postUrl: window.location.href
+      }
+    });
+  }
+
+  function handleRecordedKeydown(event) {
+    if (!vcaaRecordingActive) return;
+    if (!["Enter", "Tab"].includes(event.key)) return;
+
+    const el = event.target;
+    const fullDomMap = captureDomMap();
+    const elementId = el.getAttribute(VCAA_DATA_ATTR);
+    const filteredDomMap = filterDomMapForRecording(fullDomMap);
+    const filteredElementIds = new Set(filteredDomMap.elements.map(e => e.element_id));
+    const elementInFiltered = elementId ? filteredElementIds.has(elementId) : false;
+
+    // Reset input debounce tracker on Enter/Tab
+    vcaaLastInputElementId = null;
+
+    chrome.runtime.sendMessage({
+      type: "vcaa-record-action",
+      action: {
+        timestamp: new Date().toISOString(),
+        filteredDomMap,
+        elementInFilteredDomMap: elementInFiltered,
+        action: {
+          type: "keypress",
+          elementId: elementId,
+          elementSelector: generateSelectorForRecording(el),
+          elementDetails: getElementDetailsForRecording(el),
+          key: event.key
+        },
+        postUrl: window.location.href
+      }
+    });
+  }
+
+  function startRecordingListeners() {
+    document.addEventListener("click", handleRecordedClick, true);
+    document.addEventListener("input", handleRecordedInput, true);
+    document.addEventListener("change", handleRecordedChange, true);
+    document.addEventListener("keydown", handleRecordedKeydown, true);
+  }
+
+  function stopRecordingListeners() {
+    document.removeEventListener("click", handleRecordedClick, true);
+    document.removeEventListener("input", handleRecordedInput, true);
+    document.removeEventListener("change", handleRecordedChange, true);
+    document.removeEventListener("keydown", handleRecordedKeydown, true);
+  }
+
   async function executePlan(plan) {
     const results = [];
     for (const step of plan.steps || []) {
@@ -693,7 +970,48 @@
       sendResponse(executeFastCommand(message.action));
       return true;
     }
+    // Recording message handlers (content script just manages listeners)
+    if (message?.type === "vcaa-attach-recording-listeners") {
+      console.debug("[VCAA] Received attach-recording-listeners message");
+      // Background tells content script to attach listeners (after page load/navigation)
+      if (!vcaaRecordingActive) {
+        vcaaRecordingActive = true;
+        vcaaLastInputElementId = null;
+        captureDomMap(); // Tag elements
+        startRecordingListeners();
+        console.debug("[VCAA] Recording listeners attached successfully");
+      } else {
+        console.debug("[VCAA] Recording listeners already attached");
+      }
+      sendResponse({ status: "listeners_attached" });
+      return true;
+    }
+    if (message?.type === "vcaa-detach-recording-listeners") {
+      // Background tells content script to detach listeners
+      if (vcaaRecordingActive) {
+        vcaaRecordingActive = false;
+        vcaaLastInputElementId = null;
+        stopRecordingListeners();
+      }
+      sendResponse({ status: "listeners_detached" });
+      return true;
+    }
     return false;
+  });
+
+  // On page load, check if recording is active and attach listeners
+  chrome.runtime.sendMessage({ type: "vcaa-get-recording-status" }, (response) => {
+    if (chrome.runtime.lastError) {
+      // Background script not ready or error
+      return;
+    }
+    if (response?.isRecording) {
+      vcaaRecordingActive = true;
+      vcaaLastInputElementId = null;
+      captureDomMap(); // Tag elements
+      startRecordingListeners();
+      console.debug("[VCAA] Recording active, listeners attached after page load");
+    }
   });
 
   // Debug hook: allow page context to request a DOMMap via window.postMessage.

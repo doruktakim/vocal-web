@@ -110,6 +110,17 @@ const STORAGE_KEYS = {
   REQUIRE_HTTPS: "vcaaRequireHttps",
   PROTOCOL_PREFERENCE: "vcaaProtocolPreference",
 };
+
+// ============================================================================
+// Recording State (persists across page navigations)
+// ============================================================================
+let vcaaRecordingSession = {
+  isRecording: false,
+  prompt: null,
+  startUrl: null,
+  startTimestamp: null,
+  actions: []
+};
 const HEALTH_TIMEOUT_MS = 2500;
 
 const stripTrailingSlash = (value) => {
@@ -648,6 +659,11 @@ async function runDemoFlow(
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Debug log for recording messages
+  if (message?.type?.startsWith("vcaa-") && message.type.includes("recording")) {
+    console.debug("[VCAA Background] Received message:", message.type);
+  }
+
   if (message?.type === "vcaa-run-demo") {
     chrome.tabs
       .query({ active: true, currentWindow: true })
@@ -714,6 +730,109 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       })
       .catch((err) => sendResponse({ status: "error", error: String(err) }));
+    return true;
+  }
+
+  // ============================================================================
+  // Recording Message Handlers (state persists in background)
+  // ============================================================================
+
+  if (message?.type === "vcaa-start-recording") {
+    try {
+      vcaaRecordingSession = {
+        isRecording: true,
+        prompt: message.prompt,
+        startUrl: message.startUrl || null,
+        startTimestamp: new Date().toISOString(),
+        actions: []
+      };
+      sendResponse({ status: "recording_started" });
+    } catch (err) {
+      console.error("[VCAA] Error starting recording:", err);
+      sendResponse({ status: "error", error: String(err) });
+    }
+    return true;
+  }
+
+  if (message?.type === "vcaa-stop-recording") {
+    try {
+      const session = {
+        id: crypto.randomUUID(),
+        prompt: vcaaRecordingSession.prompt,
+        startUrl: vcaaRecordingSession.startUrl,
+        startTimestamp: vcaaRecordingSession.startTimestamp,
+        endTimestamp: new Date().toISOString(),
+        actions: vcaaRecordingSession.actions
+      };
+      vcaaRecordingSession = {
+        isRecording: false,
+        prompt: null,
+        startUrl: null,
+        startTimestamp: null,
+        actions: []
+      };
+      sendResponse({ status: "recording_stopped", session });
+    } catch (err) {
+      console.error("[VCAA] Error stopping recording:", err);
+      sendResponse({ status: "error", error: String(err) });
+    }
+    return true;
+  }
+
+  if (message?.type === "vcaa-get-recording-status") {
+    try {
+      sendResponse({
+        isRecording: vcaaRecordingSession.isRecording,
+        actionCount: vcaaRecordingSession.actions.length,
+        prompt: vcaaRecordingSession.prompt
+      });
+    } catch (err) {
+      console.error("[VCAA] Error getting recording status:", err);
+      sendResponse({ status: "error", error: String(err) });
+    }
+    return true;
+  }
+
+  if (message?.type === "vcaa-record-action") {
+    try {
+      if (vcaaRecordingSession.isRecording && message.action) {
+        // Assign sequence number
+        message.action.sequence = vcaaRecordingSession.actions.length;
+        vcaaRecordingSession.actions.push(message.action);
+        sendResponse({ status: "action_recorded", actionCount: vcaaRecordingSession.actions.length });
+      } else {
+        sendResponse({ status: "not_recording" });
+      }
+    } catch (err) {
+      console.error("[VCAA] Error recording action:", err);
+      sendResponse({ status: "error", error: String(err) });
+    }
+    return true;
+  }
+
+  if (message?.type === "vcaa-update-last-action") {
+    try {
+      // For input debouncing - update the last action's value and add intermediate state
+      if (vcaaRecordingSession.isRecording && vcaaRecordingSession.actions.length > 0) {
+        const lastAction = vcaaRecordingSession.actions[vcaaRecordingSession.actions.length - 1];
+        if (message.elementId && lastAction.action?.elementId === message.elementId) {
+          lastAction.action.value = message.value;
+          lastAction.timestamp = new Date().toISOString();
+          if (message.intermediateState) {
+            if (!lastAction.intermediateStates) {
+              lastAction.intermediateStates = [];
+            }
+            lastAction.intermediateStates.push(message.intermediateState);
+          }
+          sendResponse({ status: "action_updated" });
+          return true;
+        }
+      }
+      sendResponse({ status: "no_matching_action" });
+    } catch (err) {
+      console.error("[VCAA] Error updating last action:", err);
+      sendResponse({ status: "error", error: String(err) });
+    }
     return true;
   }
 

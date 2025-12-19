@@ -235,3 +235,63 @@ pre {
 #clarificationPanel.active {
   display: block;
 }
+
+/* Recording section styles */
+.recording-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #374151;
+}
+
+.recording-section h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem 0;
+  color: #e2e8f0;
+}
+
+.recording-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.recording-controls button {
+  flex: 1;
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#startRecording {
+  background: #16a34a;
+  color: white;
+  border: none;
+}
+
+#startRecording:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#stopRecording {
+  background: #dc2626;
+  color: white;
+  border: none;
+}
+
+#stopRecording:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.recording-status {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.recording-status.active {
+  color: #dc2626;
+  font-weight: bold;
+}

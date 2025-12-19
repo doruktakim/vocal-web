@@ -58,6 +58,23 @@
       <div id="clarificationPanel" role="status" aria-live="polite"></div>
       <div id="clarificationHistory" class="clarification-history"></div>
       <pre id="output"></pre>
+
+      <div class="recording-section">
+        <h2>Record User Actions</h2>
+        <label>
+          Task Prompt
+          <textarea
+            id="recordingPrompt"
+            rows="2"
+            placeholder="Describe the task (e.g., 'Search for flights from NYC to LA on Jan 15')"
+          ></textarea>
+        </label>
+        <div class="recording-controls">
+          <button id="startRecording" type="button">Start Recording</button>
+          <button id="stopRecording" type="button" disabled>Stop & Download</button>
+        </div>
+        <div id="recordingStatus" class="recording-status"></div>
+      </div>
     </main>
     <script src="popup.js"></script>
   </body>

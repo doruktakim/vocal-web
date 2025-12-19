@@ -549,3 +549,143 @@ if (resetClarificationButton) {
 }
 
 renderPopupClarificationHistory();
+
+// Recording controls
+const recordingPromptField = document.getElementById("recordingPrompt");
+const startRecordingBtn = document.getElementById("startRecording");
+const stopRecordingBtn = document.getElementById("stopRecording");
+const recordingStatusEl = document.getElementById("recordingStatus");
+
+let isRecordingActive = false;
+
+function updateRecordingUI(recording, actionCount = 0) {
+  isRecordingActive = recording;
+  if (startRecordingBtn) startRecordingBtn.disabled = recording;
+  if (stopRecordingBtn) stopRecordingBtn.disabled = !recording;
+  if (recordingPromptField) recordingPromptField.disabled = recording;
+
+  if (recordingStatusEl) {
+    if (recording) {
+      recordingStatusEl.textContent = `Recording... (${actionCount} actions captured)`;
+      recordingStatusEl.className = "recording-status active";
+    } else {
+      recordingStatusEl.textContent = "";
+      recordingStatusEl.className = "recording-status";
+    }
+  }
+}
+
+async function startRecording() {
+  const prompt = recordingPromptField?.value?.trim();
+  if (!prompt) {
+    log("Please enter a task prompt before recording.");
+    return;
+  }
+
+  // Get active tab to get starting URL
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    log("No active tab found.");
+    return;
+  }
+
+  // Send start message to background script (state persists there)
+  chrome.runtime.sendMessage({
+    type: "vcaa-start-recording",
+    prompt,
+    startUrl: tab.url
+  }, (response) => {
+    if (chrome.runtime.lastError) {
+      log("Failed to start recording: " + chrome.runtime.lastError.message);
+      return;
+    }
+    if (response?.status === "recording_started") {
+      // Tell content script to attach listeners
+      chrome.tabs.sendMessage(tab.id, { type: "vcaa-attach-recording-listeners" }, (attachResponse) => {
+        if (chrome.runtime.lastError) {
+          console.debug("Content script not ready:", chrome.runtime.lastError.message);
+          log("Recording started. Refresh the page or navigate to attach listeners.");
+        } else if (attachResponse?.status === "listeners_attached") {
+          log("Recording started. Perform your actions on the page.");
+        } else {
+          log("Recording started. Listeners may not be attached - try refreshing the page.");
+        }
+      });
+      updateRecordingUI(true);
+      // Start polling for action count
+      pollRecordingStatus();
+    }
+  });
+}
+
+async function stopRecording() {
+  // Get active tab to detach listeners
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  // Tell content script to detach listeners (if tab exists)
+  if (tab?.id) {
+    chrome.tabs.sendMessage(tab.id, { type: "vcaa-detach-recording-listeners" }, () => {
+      // Ignore errors
+      if (chrome.runtime.lastError) {
+        console.debug("Content script error when detaching:", chrome.runtime.lastError.message);
+      }
+    });
+  }
+
+  // Get session from background script
+  chrome.runtime.sendMessage({ type: "vcaa-stop-recording" }, (response) => {
+    if (chrome.runtime.lastError) {
+      log("Failed to stop recording: " + chrome.runtime.lastError.message);
+      return;
+    }
+    if (response?.status === "recording_stopped" && response.session) {
+      updateRecordingUI(false);
+      downloadRecording(response.session);
+      log(`Recording saved. ${response.session.actions.length} actions captured.`);
+    }
+  });
+}
+
+function pollRecordingStatus() {
+  if (!isRecordingActive) return;
+
+  // Query background script for recording status (persists across page navigations)
+  chrome.runtime.sendMessage({ type: "vcaa-get-recording-status" }, (response) => {
+    if (chrome.runtime.lastError || !response?.isRecording) {
+      updateRecordingUI(false);
+      return;
+    }
+    updateRecordingUI(true, response.actionCount);
+    setTimeout(() => pollRecordingStatus(), 1000);
+  });
+}
+
+function downloadRecording(session) {
+  const filename = `recording_${session.id.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.json`;
+  const blob = new Blob([JSON.stringify(session, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Event listeners for recording
+if (startRecordingBtn) {
+  startRecordingBtn.addEventListener("click", startRecording);
+}
+if (stopRecordingBtn) {
+  stopRecordingBtn.addEventListener("click", stopRecording);
+}
+
+// Check recording status on popup open (query background script)
+chrome.runtime.sendMessage({ type: "vcaa-get-recording-status" }, (response) => {
+  if (!chrome.runtime.lastError && response?.isRecording) {
+    updateRecordingUI(true, response.actionCount);
+    pollRecordingStatus();
+  }
+});
