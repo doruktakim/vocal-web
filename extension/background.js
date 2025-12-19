@@ -3,6 +3,16 @@ const CONTENT_SCRIPT_FILE = "content.js";
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 
 // ============================================================================
+// Session Storage Keys for Pending Execution Plans
+// ============================================================================
+const SESSION_STORAGE_KEYS = {
+  PENDING_PLAN: "vcaaPendingPlan",
+};
+
+// Track tabs waiting for navigation completion
+const pendingNavigationTabs = new Map();
+
+// ============================================================================
 // Fast Command Detection (inline for service worker compatibility)
 // ============================================================================
 
@@ -109,8 +119,45 @@ const STORAGE_KEYS = {
   API_KEY: "vcaaApiKey",
   REQUIRE_HTTPS: "vcaaRequireHttps",
   PROTOCOL_PREFERENCE: "vcaaProtocolPreference",
+  USE_ACCESSIBILITY_TREE: "vcaaUseAccessibilityTree",
 };
 const HEALTH_TIMEOUT_MS = 2500;
+
+// ============================================================================
+// Session Storage Functions for Pending Plans
+// ============================================================================
+
+/**
+ * Save a pending execution plan to session storage.
+ * @param {number} tabId - The tab ID
+ * @param {object} pendingData - Data to persist across navigation
+ */
+async function savePendingPlan(tabId, pendingData) {
+  const key = `${SESSION_STORAGE_KEYS.PENDING_PLAN}_${tabId}`;
+  await chrome.storage.session.set({ [key]: pendingData });
+  console.log(`[VCAA] Saved pending plan for tab ${tabId}`, pendingData.traceId);
+}
+
+/**
+ * Get a pending execution plan from session storage.
+ * @param {number} tabId - The tab ID
+ * @returns {Promise<object|null>}
+ */
+async function getPendingPlan(tabId) {
+  const key = `${SESSION_STORAGE_KEYS.PENDING_PLAN}_${tabId}`;
+  const result = await chrome.storage.session.get([key]);
+  return result[key] || null;
+}
+
+/**
+ * Clear a pending execution plan from session storage.
+ * @param {number} tabId - The tab ID
+ */
+async function clearPendingPlan(tabId) {
+  const key = `${SESSION_STORAGE_KEYS.PENDING_PLAN}_${tabId}`;
+  await chrome.storage.session.remove([key]);
+  console.log(`[VCAA] Cleared pending plan for tab ${tabId}`);
+}
 
 const stripTrailingSlash = (value) => {
   if (!value) {
@@ -136,6 +183,15 @@ const readSyncStorage = (keys) =>
       resolve(items || {});
     });
   });
+
+/**
+ * Check if accessibility tree mode is enabled.
+ * @returns {Promise<boolean>}
+ */
+async function isAccessibilityTreeModeEnabled() {
+  const settings = await readSyncStorage([STORAGE_KEYS.USE_ACCESSIBILITY_TREE]);
+  return Boolean(settings[STORAGE_KEYS.USE_ACCESSIBILITY_TREE]);
+}
 
 const convertHttpToHttps = (base) => {
   try {
@@ -342,6 +398,115 @@ async function fetchExecutionPlan(apiBase, actionPlan, domMap, traceId) {
     dom_map: domMap,
   };
   return authorizedRequest(apiBase, "/api/navigator/executionplan", body);
+}
+
+/**
+ * Fetch an execution plan using the accessibility tree (AX mode).
+ * @param {string} apiBase - API base URL
+ * @param {object} actionPlan - The action plan from the interpreter
+ * @param {object} axTree - The accessibility tree
+ * @param {string} traceId - Trace ID for logging
+ * @returns {Promise<object>} - Execution plan or clarification
+ */
+async function fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId) {
+  const body = {
+    schema_version: "ax_navigator_v1",
+    id: crypto.randomUUID(),
+    trace_id: traceId,
+    action_plan: actionPlan,
+    ax_tree: axTree,
+  };
+  return authorizedRequest(apiBase, "/api/navigator/ax-executionplan", body);
+}
+
+/**
+ * Execute an AX-mode execution plan using CDP.
+ * @param {number} tabId - The tab ID
+ * @param {object} executionPlan - The execution plan with backend_node_id references
+ * @param {string} traceId - Trace ID for logging
+ * @returns {Promise<object>} - Execution result
+ */
+async function executeAxPlanViaCDP(tabId, executionPlan, traceId) {
+  const stepResults = [];
+  const errors = [];
+  
+  for (const step of executionPlan.steps || []) {
+    const start = performance.now();
+    
+    // Handle navigate action - this should trigger saving pending plan
+    if (step.action_type === "navigate") {
+      try {
+        if (step.value) {
+          // Navigation will be handled by the caller saving a pending plan
+          await chrome.tabs.update(tabId, { url: step.value });
+          stepResults.push({
+            step_id: step.step_id,
+            status: "success",
+            error: null,
+            duration_ms: Math.round(performance.now() - start),
+          });
+        } else {
+          stepResults.push({
+            step_id: step.step_id,
+            status: "error",
+            error: "Missing navigation URL",
+          });
+        }
+      } catch (err) {
+        stepResults.push({
+          step_id: step.step_id,
+          status: "error",
+          error: String(err),
+        });
+        errors.push({ step_id: step.step_id, error: String(err) });
+      }
+      continue;
+    }
+    
+    // For CDP-based actions, need backend_node_id
+    if (!step.backend_node_id) {
+      stepResults.push({
+        step_id: step.step_id,
+        status: "error",
+        error: "Missing backend_node_id for CDP execution",
+      });
+      errors.push({ step_id: step.step_id, error: "Missing backend_node_id" });
+      continue;
+    }
+    
+    try {
+      const result = await cdpExecuteStep(tabId, step);
+      stepResults.push({
+        step_id: step.step_id,
+        status: result.success ? "success" : "error",
+        error: result.error || null,
+        duration_ms: Math.round(performance.now() - start),
+      });
+      if (!result.success) {
+        errors.push({ step_id: step.step_id, error: result.error });
+      }
+    } catch (err) {
+      stepResults.push({
+        step_id: step.step_id,
+        status: "error",
+        error: String(err),
+        duration_ms: Math.round(performance.now() - start),
+      });
+      errors.push({ step_id: step.step_id, error: String(err) });
+    }
+    
+    // Small delay between steps to allow UI to update
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  
+  return {
+    schema_version: "executionresult_v1",
+    id: crypto.randomUUID(),
+    trace_id: traceId,
+    step_results: stepResults,
+    errors,
+    status: errors.length === 0 ? "success" : "partial",
+  };
 }
 
 async function sendExecutionResult(apiBase, result) {
@@ -631,6 +796,173 @@ async function runDemoFlowInternal(
   return { status: "completed", actionPlan, executionPlan, execResult, domMap };
 }
 
+/**
+ * AX-mode demo flow with proper navigation handling.
+ * Uses accessibility tree and CDP for element interaction.
+ */
+async function runDemoFlowInternalAX(
+  transcript,
+  tabId,
+  clarificationResponse,
+  clarificationHistory = []
+) {
+  // FAST PATH: Check for simple commands first (only on fresh commands)
+  if (!clarificationResponse) {
+    const fastCommand = matchFastCommand(transcript);
+    if (fastCommand) {
+      console.log("[VCAA-AX] Fast path: executing", fastCommand.type);
+      const result = await sendMessageWithInjection(tabId, {
+        type: "fast-command",
+        action: fastCommand
+      });
+      return {
+        status: "completed",
+        fastPath: true,
+        action: fastCommand,
+        execResult: result
+      };
+    }
+  }
+
+  const { apiBase } = await resolveApiConfig();
+  const traceId = crypto.randomUUID();
+
+  // Attach debugger for AX tree access
+  await attachDebugger(tabId);
+
+  // Collect AX tree instead of DOMMap
+  let axTree = await collectAccessibilityTree(tabId, traceId);
+
+  // Get action plan from interpreter
+  const actionPlan = await fetchActionPlan(
+    apiBase,
+    transcript,
+    traceId,
+    axTree, // Use axTree as page context
+    clarificationResponse,
+    clarificationHistory
+  );
+
+  if (actionPlan.schema_version === "clarification_v1") {
+    if (shouldAskHumanClarification(actionPlan)) {
+      return { status: "needs_clarification", actionPlan, domMap: axTree };
+    }
+    // For AX mode, we can't easily do fallback clicks, return clarification
+    return { status: "needs_clarification", actionPlan, domMap: axTree };
+  }
+
+  // Check if we need to navigate first
+  const desiredUrl = actionPlan?.entities?.url || actionPlan?.value;
+  const currentUrl = axTree?.page_url || "";
+  const needsNavigation = desiredUrl && !currentUrl.includes(desiredUrl.replace(/^https?:\/\//, "").split("/")[0]);
+
+  if (needsNavigation) {
+    console.log(`[VCAA-AX] Navigation needed to: ${desiredUrl}`);
+    
+    // Save pending plan BEFORE navigation
+    await savePendingPlan(tabId, {
+      traceId,
+      actionPlan,
+      transcript,
+      apiBase,
+      useAccessibilityTree: true,
+      savedAt: Date.now(),
+    });
+    pendingNavigationTabs.set(tabId, true);
+
+    // Navigate using chrome.tabs.update (cleaner than content script)
+    await chrome.tabs.update(tabId, { url: desiredUrl });
+
+    // Return immediately - the webNavigation listener will resume
+    return {
+      status: "navigating",
+      message: `Navigating to ${desiredUrl}. Actions will continue after page loads.`,
+      actionPlan,
+    };
+  }
+
+  // No navigation needed, proceed with execution
+  let executionPlan = null;
+  let execResult = null;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // Fetch execution plan using AX tree
+    executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId);
+
+    if (executionPlan.schema_version === "clarification_v1") {
+      if (shouldAskHumanClarification(executionPlan)) {
+        return { status: "needs_clarification", executionPlan, domMap: axTree };
+      }
+      return { status: "needs_clarification", executionPlan, domMap: axTree };
+    }
+
+    // Check if the plan contains navigation steps
+    const navStep = (executionPlan.steps || []).find(
+      (s) => s.action_type === "navigate" || s.action_type === "open_site"
+    );
+
+    if (navStep && navStep.value) {
+      console.log(`[VCAA-AX] Plan contains navigation step to: ${navStep.value}`);
+      
+      // Remove the nav step and save remaining steps as pending
+      const remainingSteps = (executionPlan.steps || []).filter((s) => s !== navStep);
+      
+      if (remainingSteps.length > 0) {
+        // Create a modified action plan for post-navigation
+        await savePendingPlan(tabId, {
+          traceId,
+          actionPlan,
+          transcript,
+          apiBase,
+          useAccessibilityTree: true,
+          savedAt: Date.now(),
+        });
+        pendingNavigationTabs.set(tabId, true);
+      }
+
+      // Execute navigation
+      await chrome.tabs.update(tabId, { url: navStep.value });
+
+      if (remainingSteps.length > 0) {
+        return {
+          status: "navigating",
+          message: `Navigating to ${navStep.value}. Actions will continue after page loads.`,
+          actionPlan,
+          executionPlan,
+        };
+      }
+      
+      // Only navigation was in the plan
+      return {
+        status: "completed",
+        actionPlan,
+        executionPlan,
+        execResult: {
+          step_results: [{ step_id: navStep.step_id, status: "success" }],
+          status: "success",
+        },
+      };
+    }
+
+    // Execute non-navigation steps via CDP
+    execResult = await executeAxPlanViaCDP(tabId, executionPlan, traceId);
+    await sendExecutionResult(apiBase, execResult);
+
+    const executionErrors = execResult?.errors || [];
+    if (executionErrors.length) {
+      console.warn("[VCAA-AX] Execution errors detected", { traceId, errors: executionErrors });
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      axTree = await collectAccessibilityTree(tabId, traceId);
+      continue;
+    }
+
+    // Success - break out of retry loop
+    break;
+  }
+
+  return { status: "completed", actionPlan, executionPlan, execResult, domMap: axTree };
+}
+
 async function runDemoFlow(
   transcript,
   tabId,
@@ -638,6 +970,14 @@ async function runDemoFlow(
   clarificationHistory = []
 ) {
   try {
+    // Check if AX mode is enabled
+    const useAXMode = await isAccessibilityTreeModeEnabled();
+    
+    if (useAXMode) {
+      console.log("[VCAA] Using Accessibility Tree mode");
+      return await runDemoFlowInternalAX(transcript, tabId, clarificationResponse, clarificationHistory);
+    }
+    
     return await runDemoFlowInternal(transcript, tabId, clarificationResponse, clarificationHistory);
   } catch (err) {
     if (err instanceof AuthenticationError) {
@@ -977,12 +1317,198 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (debuggerAttached.has(tabId)) {
     debuggerAttached.delete(tabId);
   }
+  // Also clean up any pending plans for this tab
+  clearPendingPlan(tabId);
+  pendingNavigationTabs.delete(tabId);
 });
 
 // Handle debugger detach events
 chrome.debugger.onDetach.addListener((source, reason) => {
   if (source.tabId) {
     debuggerAttached.delete(source.tabId);
+    console.log(`[VCAA] Debugger detached from tab ${source.tabId}: ${reason}`);
+  }
+});
+
+// ============================================================================
+// Navigation Completion Handler - Resume Pending Plans
+// ============================================================================
+
+/**
+ * Ensure the debugger is attached to a tab, re-attaching if needed.
+ * @param {number} tabId - The tab ID
+ */
+async function ensureDebuggerAttached(tabId) {
+  if (debuggerAttached.get(tabId)) {
+    return;
+  }
+  await attachDebugger(tabId);
+}
+
+/**
+ * Wait for a tab to finish loading with a timeout.
+ * @param {number} tabId - The tab ID
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @returns {Promise<boolean>} - True if loaded, false if timed out
+ */
+function waitForTabLoad(tabId, timeoutMs = 10000) {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(false);
+    }, timeoutMs);
+
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve(true);
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(listener);
+
+    // Check if already complete
+    chrome.tabs.get(tabId).then((tab) => {
+      if (tab.status === "complete") {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve(true);
+      }
+    }).catch(() => {
+      clearTimeout(timeout);
+      resolve(false);
+    });
+  });
+}
+
+/**
+ * Re-match an element by its semantic properties after navigation.
+ * Used when backendDOMNodeId is no longer valid.
+ * @param {number} tabId - The tab ID
+ * @param {object} originalElement - The element to re-match (with name, role)
+ * @returns {Promise<number|null>} - New backendDOMNodeId or null
+ */
+async function rematchElementBySemantics(tabId, originalElement) {
+  const axNodes = await getAccessibilityTree(tabId);
+  const elements = transformAXTree(axNodes);
+  
+  // Find best matching element by name and role
+  const candidates = elements.filter((el) => {
+    // Must have same role
+    if (el.role !== originalElement.role) return false;
+    
+    // Name must match (with some fuzzy tolerance)
+    const origName = (originalElement.name || "").toLowerCase().trim();
+    const elName = (el.name || "").toLowerCase().trim();
+    
+    if (!origName || !elName) return false;
+    
+    // Exact match or substring match
+    return elName === origName || 
+           elName.includes(origName) || 
+           origName.includes(elName);
+  });
+
+  if (candidates.length === 0) {
+    console.warn(`[VCAA] Could not re-match element: ${originalElement.name} (${originalElement.role})`);
+    return null;
+  }
+
+  // Return the first candidate (best match)
+  console.log(`[VCAA] Re-matched element "${originalElement.name}" to backend_node_id=${candidates[0].backend_node_id}`);
+  return candidates[0].backend_node_id;
+}
+
+/**
+ * Resume execution of a pending plan after navigation completes.
+ * @param {number} tabId - The tab ID
+ */
+async function resumePendingPlanAfterNavigation(tabId) {
+  const pendingData = await getPendingPlan(tabId);
+  if (!pendingData) {
+    console.log(`[VCAA] No pending plan for tab ${tabId}`);
+    return;
+  }
+
+  console.log(`[VCAA] Resuming pending plan for tab ${tabId}, trace_id=${pendingData.traceId}`);
+  
+  try {
+    const { traceId, actionPlan, useAccessibilityTree, apiBase, transcript } = pendingData;
+    
+    // Clear the pending plan first to avoid re-execution loops
+    await clearPendingPlan(tabId);
+    pendingNavigationTabs.delete(tabId);
+
+    // Wait a bit for the page to stabilize
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    
+    // Ensure content script is injected
+    await injectContentScript(tabId);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    if (useAccessibilityTree) {
+      // Re-attach debugger if needed (may have detached during navigation)
+      await ensureDebuggerAttached(tabId);
+      
+      // Collect fresh AX tree
+      const axTree = await collectAccessibilityTree(tabId, traceId);
+      
+      // Fetch new execution plan using the AX tree
+      const executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId);
+      
+      if (executionPlan.schema_version === "clarification_v1") {
+        console.log(`[VCAA] Navigator requested clarification after navigation`);
+        // Can't easily surface clarification here, log and exit
+        return;
+      }
+      
+      // Execute the plan using CDP
+      const execResult = await executeAxPlanViaCDP(tabId, executionPlan, traceId);
+      await sendExecutionResult(apiBase, execResult);
+      
+      console.log(`[VCAA] Resumed AX plan execution complete for tab ${tabId}`);
+    } else {
+      // DOM mode - collect fresh DOMMap
+      const domMap = await collectDomMap(tabId, traceId);
+      
+      // Fetch new execution plan
+      const executionPlan = await fetchExecutionPlan(apiBase, actionPlan, domMap, traceId);
+      
+      if (executionPlan.schema_version === "clarification_v1") {
+        console.log(`[VCAA] Navigator requested clarification after navigation`);
+        return;
+      }
+      
+      // Execute via content script
+      const execResult = await sendMessageWithInjection(tabId, {
+        type: "execute-plan",
+        plan: executionPlan,
+      });
+      await sendExecutionResult(apiBase, execResult);
+      
+      console.log(`[VCAA] Resumed DOM plan execution complete for tab ${tabId}`);
+    }
+  } catch (err) {
+    console.error(`[VCAA] Failed to resume pending plan for tab ${tabId}:`, err);
+  }
+}
+
+// Listen for navigation completion to resume pending plans
+chrome.webNavigation.onCompleted.addListener(async (details) => {
+  // Only handle main frame navigations
+  if (details.frameId !== 0) {
+    return;
+  }
+
+  const tabId = details.tabId;
+  console.log(`[VCAA] Navigation completed for tab ${tabId}: ${details.url}`);
+
+  // Check if this tab has a pending plan waiting for navigation
+  if (pendingNavigationTabs.has(tabId)) {
+    // Small delay to ensure page is fully interactive
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await resumePendingPlanAfterNavigation(tabId);
   }
 });
 
@@ -1116,6 +1642,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         sendResponse({ status: "ok" });
       })
+      .catch((err) => sendResponse({ status: "error", error: String(err) }));
+    return true;
+  }
+
+  // Set accessibility tree mode
+  if (message?.type === "vcaa-set-ax-mode") {
+    const enabled = Boolean(message.enabled);
+    chrome.storage.sync.set({ [STORAGE_KEYS.USE_ACCESSIBILITY_TREE]: enabled }, () => {
+      console.log(`[VCAA] Accessibility tree mode ${enabled ? "enabled" : "disabled"}`);
+      sendResponse({ status: "ok", enabled });
+    });
+    return true;
+  }
+
+  // Get accessibility tree mode status
+  if (message?.type === "vcaa-get-ax-mode") {
+    isAccessibilityTreeModeEnabled()
+      .then((enabled) => sendResponse({ status: "ok", enabled }))
       .catch((err) => sendResponse({ status: "error", error: String(err) }));
     return true;
   }

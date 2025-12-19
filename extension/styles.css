@@ -76,6 +76,33 @@ label.require-https-toggle {
   width: auto;
 }
 
+.ax-mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  padding: 4px 0;
+  border-top: 1px solid #e5e7eb;
+  margin-top: 4px;
+}
+
+label.ax-mode-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ax-mode-toggle input {
+  width: auto;
+}
+
+.status-info {
+  color: #6b7280;
+  cursor: help;
+}
+
 .field-status {
   font-size: 11px;
   margin-top: 2px;

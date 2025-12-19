@@ -5,6 +5,8 @@ const apiKeyStatus = document.getElementById("apiKeyStatus");
 const toggleApiKeyVisibility = document.getElementById("toggleApiKeyVisibility");
 const connectionSecurityStatus = document.getElementById("connectionSecurityStatus");
 const requireHttpsToggle = document.getElementById("requireHttps");
+const useAccessibilityTreeToggle = document.getElementById("useAccessibilityTree");
+const axModeStatus = document.getElementById("axModeStatus");
 const outputEl = document.getElementById("output");
 const clarificationPanel = document.getElementById("clarificationPanel");
 const clarificationHistoryContainer = document.getElementById("clarificationHistory");
@@ -390,6 +392,10 @@ function formatResponse(resp) {
     return formatClarification(plan);
   }
 
+  if (resp.status === "navigating") {
+    return resp.message || "Navigating to target site. Actions will continue after page loads.";
+  }
+
   if (resp.status === "completed") {
     // Fast path response - instant command execution
     if (resp.fastPath && resp.action) {
@@ -426,7 +432,7 @@ function formatResponse(resp) {
 }
 
 function loadConfig() {
-  chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps"], (result) => {
+  chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps", "vcaaUseAccessibilityTree"], (result) => {
     if (result.vcaaApiBase) {
       apiBaseField.value = result.vcaaApiBase;
     } else {
@@ -442,6 +448,9 @@ function loadConfig() {
     }
     if (requireHttpsToggle) {
       requireHttpsToggle.checked = Boolean(result.vcaaRequireHttps);
+    }
+    if (useAccessibilityTreeToggle) {
+      useAccessibilityTreeToggle.checked = Boolean(result.vcaaUseAccessibilityTree);
     }
     refreshConnectionSecurityIndicator();
   });
@@ -467,6 +476,15 @@ function handleRequireHttpsToggle(event) {
   const enforced = Boolean(event?.target?.checked);
   chrome.storage.sync.set({ vcaaRequireHttps: enforced }, () => {
     refreshConnectionSecurityIndicator();
+  });
+}
+
+function handleUseAccessibilityTreeToggle(event) {
+  const enabled = Boolean(event?.target?.checked);
+  chrome.runtime.sendMessage({ type: "vcaa-set-ax-mode", enabled }, (resp) => {
+    if (resp?.status === "ok") {
+      console.log(`Accessibility tree mode ${enabled ? "enabled" : "disabled"}`);
+    }
   });
 }
 
@@ -535,6 +553,10 @@ if (apiBaseField) {
 
 if (requireHttpsToggle) {
   requireHttpsToggle.addEventListener("change", handleRequireHttpsToggle);
+}
+
+if (useAccessibilityTreeToggle) {
+  useAccessibilityTreeToggle.addEventListener("change", handleUseAccessibilityTreeToggle);
 }
 
 updateMicButtonLabel();
