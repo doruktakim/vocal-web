@@ -190,3 +190,86 @@ class PipelineRequest(Model):
     @validator("metadata", pre=True, always=True)
     def _default_metadata(cls, value):
         return dict(value or {})
+
+
+# ============================================================================
+# Accessibility Tree Schemas (CDP-based, LLM-free navigation)
+# ============================================================================
+
+
+class AXElement(Model):
+    """An element from the Chrome Accessibility Tree via CDP."""
+
+    ax_id: str  # AXNodeId from CDP
+    backend_node_id: int  # backendDOMNodeId for DOM operations
+    role: str  # Semantic role (button, textbox, gridcell, etc.)
+    name: str = ""  # Computed accessible name
+    description: str = ""  # Accessible description
+    value: str = ""  # Current value
+    focusable: bool = False
+    focused: bool = False
+    expanded: Optional[bool] = None
+    disabled: bool = False
+    checked: Optional[bool] = None
+    selected: Optional[bool] = None
+
+
+class AXTree(Model):
+    """Accessibility tree captured from a page via CDP."""
+
+    schema_version: str = "axtree_v1"
+    id: Optional[str] = None
+    trace_id: Optional[str] = None
+    page_url: Optional[str] = None
+    generated_at: Optional[str] = None
+    elements: List[AXElement]
+
+    @validator("generated_at", pre=True, always=True)
+    def _default_generated_at(cls, value):
+        return value or utc_now_iso()
+
+
+class Intent(Model):
+    """Parsed intent from an ActionPlan for element matching."""
+
+    action: str  # Action type: click, input, select_date, search, etc.
+    target: Optional[str] = None  # Target description (e.g., "search button")
+    value: Optional[str] = None  # Value to input
+    date: Optional[str] = None  # ISO date if selecting a date
+    date_end: Optional[str] = None  # End date for ranges
+    location: Optional[str] = None  # Location/destination
+    origin: Optional[str] = None  # Origin location
+    position: Optional[int] = None  # Nth item (e.g., "second result")
+    latest: bool = False  # Prefer most recent item
+
+
+class AXNavigationRequest(Model):
+    """Navigation request using accessibility tree instead of DOM."""
+
+    schema_version: str = "axnavigator_v1"
+    id: str
+    trace_id: Optional[str] = None
+    action_plan: ActionPlan
+    ax_tree: AXTree
+
+
+class AXExecutionStep(Model):
+    """Execution step using backend_node_id for CDP execution."""
+
+    step_id: str
+    action_type: str  # click, input, focus
+    backend_node_id: int  # CDP backend node ID
+    value: Optional[str] = None
+    timeout_ms: int = 4000
+    retries: int = 0
+    confidence: float = 1.0
+    notes: Optional[str] = None
+
+
+class AXExecutionPlan(Model):
+    """Execution plan using accessibility tree elements."""
+
+    schema_version: str = "axexecutionplan_v1"
+    id: str
+    trace_id: Optional[str] = None
+    steps: List[AXExecutionStep]

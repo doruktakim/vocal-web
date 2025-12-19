@@ -18,7 +18,15 @@
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const normalizeText = (value) => (value || "").toLowerCase().trim();
+  const normalizeText = (value, { preserveCase = false, collapseWhitespace = true } = {}) => {
+    if (value === undefined || value === null) return "";
+    let text = String(value);
+    if (collapseWhitespace) {
+      text = text.replace(/\s+/g, " ");
+    }
+    text = text.trim();
+    return preserveCase ? text : text.toLowerCase();
+  };
 
   function levenshteinDistance(a, b) {
     if (!a && !b) return 0;
@@ -397,13 +405,8 @@
     return Boolean(value);
   }
 
-  function normalizeText(value) {
-    if (!value) return "";
-    return String(value).replace(/\s+/g, " ").trim();
-  }
-
   function getAriaLabelledByText(el) {
-    const ids = normalizeText(el.getAttribute("aria-labelledby"));
+    const ids = normalizeText(el.getAttribute("aria-labelledby"), { preserveCase: true });
     if (!ids) return "";
     return ids
       .split(/\s+/)

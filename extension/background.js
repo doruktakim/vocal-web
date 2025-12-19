@@ -647,6 +647,349 @@ async function runDemoFlow(
   }
 }
 
+// ============================================================================
+// CDP (Chrome DevTools Protocol) Integration for Accessibility Tree
+// ============================================================================
+
+// Track debugger attachment state per tab to avoid duplicate attachments
+const debuggerAttached = new Map();
+
+/**
+ * Attach Chrome debugger to a tab.
+ * @param {number} tabId - The tab ID to attach to
+ * @returns {Promise<void>}
+ */
+async function attachDebugger(tabId) {
+  if (debuggerAttached.get(tabId)) {
+    return; // Already attached
+  }
+  return new Promise((resolve, reject) => {
+    chrome.debugger.attach({ tabId }, "1.3", () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        debuggerAttached.set(tabId, true);
+        resolve();
+      }
+    });
+  });
+}
+
+/**
+ * Detach Chrome debugger from a tab.
+ * @param {number} tabId - The tab ID to detach from
+ * @returns {Promise<void>}
+ */
+async function detachDebugger(tabId) {
+  if (!debuggerAttached.get(tabId)) {
+    return; // Not attached
+  }
+  return new Promise((resolve) => {
+    chrome.debugger.detach({ tabId }, () => {
+      debuggerAttached.delete(tabId);
+      resolve();
+    });
+  });
+}
+
+/**
+ * Send a CDP command to a tab.
+ * @param {number} tabId - The tab ID
+ * @param {string} method - CDP method name
+ * @param {object} params - CDP method parameters
+ * @returns {Promise<any>}
+ */
+async function sendCDPCommand(tabId, method, params = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, method, params, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve(result);
+      }
+    });
+  });
+}
+
+/**
+ * Get the full accessibility tree for a tab via CDP.
+ * @param {number} tabId - The tab ID
+ * @returns {Promise<Array>} Array of AXNodes
+ */
+async function getAccessibilityTree(tabId) {
+  try {
+    await attachDebugger(tabId);
+    // Enable accessibility domain first
+    await sendCDPCommand(tabId, "Accessibility.enable");
+    // Get the full accessibility tree with depth limit for performance
+    const result = await sendCDPCommand(tabId, "Accessibility.getFullAXTree", {
+      depth: 15, // Limit depth to avoid huge trees
+    });
+    return result?.nodes || [];
+  } catch (err) {
+    console.warn("[VCAA] Failed to get accessibility tree:", err);
+    return [];
+  }
+}
+
+/**
+ * Transform raw AXNodes into a compact, semantic format for matching.
+ * @param {Array} axNodes - Raw AXNodes from CDP
+ * @returns {Array} Transformed elements
+ */
+function transformAXTree(axNodes) {
+  const INTERACTIVE_ROLES = new Set([
+    "button", "textbox", "combobox", "searchbox", "link",
+    "menuitem", "option", "tab", "gridcell", "spinbutton",
+    "slider", "checkbox", "radio", "listitem", "menuitemcheckbox",
+    "menuitemradio", "switch", "treeitem"
+  ]);
+
+  const elements = [];
+
+  for (const node of axNodes) {
+    // Skip ignored nodes
+    if (node.ignored) continue;
+
+    // Get role value
+    const role = node.role?.value?.toLowerCase();
+    if (!role) continue;
+
+    // Only include interactive elements
+    if (!INTERACTIVE_ROLES.has(role)) continue;
+
+    // Extract properties
+    const props = {};
+    if (node.properties) {
+      for (const prop of node.properties) {
+        if (prop.name && prop.value !== undefined) {
+          props[prop.name] = prop.value?.value ?? prop.value;
+        }
+      }
+    }
+
+    elements.push({
+      ax_id: node.nodeId,
+      backend_node_id: node.backendDOMNodeId,
+      role: role,
+      name: node.name?.value || "",
+      description: node.description?.value || "",
+      value: node.value?.value || "",
+      focusable: props.focusable ?? false,
+      focused: props.focused ?? false,
+      expanded: props.expanded,
+      disabled: props.disabled ?? false,
+      checked: props.checked,
+      selected: props.selected,
+    });
+  }
+
+  return elements;
+}
+
+// ============================================================================
+// CDP Element Execution Functions
+// ============================================================================
+
+/**
+ * Focus an element using CDP.
+ * @param {number} tabId - The tab ID
+ * @param {number} backendNodeId - The backend DOM node ID
+ */
+async function cdpFocusElement(tabId, backendNodeId) {
+  await sendCDPCommand(tabId, "DOM.focus", { backendNodeId });
+}
+
+/**
+ * Scroll an element into view using CDP.
+ * @param {number} tabId - The tab ID
+ * @param {number} backendNodeId - The backend DOM node ID
+ */
+async function cdpScrollIntoView(tabId, backendNodeId) {
+  await sendCDPCommand(tabId, "DOM.scrollIntoViewIfNeeded", { backendNodeId });
+}
+
+/**
+ * Get element's bounding box using CDP.
+ * @param {number} tabId - The tab ID
+ * @param {number} backendNodeId - The backend DOM node ID
+ * @returns {Promise<{x: number, y: number, width: number, height: number}|null>}
+ */
+async function cdpGetElementBox(tabId, backendNodeId) {
+  try {
+    const result = await sendCDPCommand(tabId, "DOM.getBoxModel", { backendNodeId });
+    if (!result?.model?.content) {
+      return null;
+    }
+    // content is [x1, y1, x2, y2, x3, y3, x4, y4] (quad)
+    const content = result.model.content;
+    return {
+      x: (content[0] + content[2]) / 2,
+      y: (content[1] + content[5]) / 2,
+      width: content[2] - content[0],
+      height: content[5] - content[1],
+    };
+  } catch (err) {
+    console.warn("[VCAA] Failed to get element box:", err);
+    return null;
+  }
+}
+
+/**
+ * Dispatch a mouse event using CDP.
+ * @param {number} tabId - The tab ID
+ * @param {string} type - Event type (mousePressed, mouseReleased, mouseMoved)
+ * @param {number} x - X coordinate
+ * @param {number} y - Y coordinate
+ * @param {string} button - Mouse button (left, middle, right)
+ */
+async function cdpDispatchMouseEvent(tabId, type, x, y, button = "left") {
+  await sendCDPCommand(tabId, "Input.dispatchMouseEvent", {
+    type,
+    x,
+    y,
+    button,
+    clickCount: 1,
+  });
+}
+
+/**
+ * Click an element using CDP (scroll into view, then dispatch mouse events).
+ * @param {number} tabId - The tab ID
+ * @param {number} backendNodeId - The backend DOM node ID
+ */
+async function cdpClickElement(tabId, backendNodeId) {
+  // Scroll element into view first
+  await cdpScrollIntoView(tabId, backendNodeId);
+  // Small delay for scroll to complete
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  // Get element position
+  const box = await cdpGetElementBox(tabId, backendNodeId);
+  if (!box) {
+    throw new Error("Could not get element position for click");
+  }
+
+  // Dispatch mouse events
+  await cdpDispatchMouseEvent(tabId, "mousePressed", box.x, box.y);
+  await cdpDispatchMouseEvent(tabId, "mouseReleased", box.x, box.y);
+}
+
+/**
+ * Input text into an element using CDP.
+ * @param {number} tabId - The tab ID
+ * @param {number} backendNodeId - The backend DOM node ID
+ * @param {string} text - Text to input
+ * @param {boolean} clearFirst - Whether to clear existing value first
+ */
+async function cdpInputText(tabId, backendNodeId, text, clearFirst = true) {
+  // Focus the element first
+  await cdpFocusElement(tabId, backendNodeId);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  if (clearFirst) {
+    // Select all and delete (Ctrl+A, then Delete)
+    await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+      type: "keyDown",
+      modifiers: 2, // Ctrl
+      key: "a",
+      code: "KeyA",
+    });
+    await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+      type: "keyUp",
+      modifiers: 2,
+      key: "a",
+      code: "KeyA",
+    });
+    await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key: "Delete",
+      code: "Delete",
+    });
+    await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "Delete",
+      code: "Delete",
+    });
+  }
+
+  // Insert the text
+  await sendCDPCommand(tabId, "Input.insertText", { text });
+}
+
+/**
+ * Execute a single step using CDP.
+ * @param {number} tabId - The tab ID
+ * @param {object} step - Execution step with action_type, backend_node_id, value
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function cdpExecuteStep(tabId, step) {
+  try {
+    const { action_type, backend_node_id, value } = step;
+
+    switch (action_type) {
+      case "click":
+        await cdpClickElement(tabId, backend_node_id);
+        break;
+      case "input":
+        await cdpInputText(tabId, backend_node_id, value || "");
+        break;
+      case "focus":
+        await cdpFocusElement(tabId, backend_node_id);
+        break;
+      default:
+        return { success: false, error: `Unknown action type: ${action_type}` };
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Collect accessibility tree for a tab and return transformed elements.
+ * @param {number} tabId - The tab ID
+ * @param {string} traceId - Trace ID for logging
+ * @returns {Promise<{elements: Array, page_url: string}>}
+ */
+async function collectAccessibilityTree(tabId, traceId) {
+  const axNodes = await getAccessibilityTree(tabId);
+  const elements = transformAXTree(axNodes);
+
+  // Get current page URL
+  const tab = await chrome.tabs.get(tabId);
+
+  console.log(`[VCAA] Collected ${elements.length} interactive elements from AX tree (trace_id=${traceId})`);
+
+  return {
+    schema_version: "axtree_v1",
+    id: crypto.randomUUID(),
+    trace_id: traceId,
+    page_url: tab.url,
+    generated_at: new Date().toISOString(),
+    elements,
+  };
+}
+
+// Clean up debugger when tab is closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (debuggerAttached.has(tabId)) {
+    debuggerAttached.delete(tabId);
+  }
+});
+
+// Handle debugger detach events
+chrome.debugger.onDetach.addListener((source, reason) => {
+  if (source.tabId) {
+    debuggerAttached.delete(source.tabId);
+  }
+});
+
+// ============================================================================
+// Message Handlers
+// ============================================================================
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "vcaa-run-demo") {
     chrome.tabs
@@ -712,6 +1055,66 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } catch (err) {
           sendResponse({ status: "error", error: String(err) });
         }
+      })
+      .catch((err) => sendResponse({ status: "error", error: String(err) }));
+    return true;
+  }
+
+  // Collect accessibility tree via CDP
+  if (message?.type === "vcaa-collect-axtree") {
+    chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .then(async (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id) {
+          sendResponse({ status: "error", error: "No active tab" });
+          return;
+        }
+        try {
+          const traceId = message.traceId || crypto.randomUUID();
+          const axTree = await collectAccessibilityTree(tab.id, traceId);
+          sendResponse({ status: "ok", axTree });
+        } catch (err) {
+          sendResponse({ status: "error", error: String(err) });
+        }
+      })
+      .catch((err) => sendResponse({ status: "error", error: String(err) }));
+    return true;
+  }
+
+  // Execute a step via CDP (click, input, focus using backendNodeId)
+  if (message?.type === "vcaa-cdp-execute") {
+    chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .then(async (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id) {
+          sendResponse({ status: "error", error: "No active tab" });
+          return;
+        }
+        try {
+          // Ensure debugger is attached
+          await attachDebugger(tab.id);
+          const result = await cdpExecuteStep(tab.id, message.step);
+          sendResponse({ status: result.success ? "ok" : "error", ...result });
+        } catch (err) {
+          sendResponse({ status: "error", error: String(err) });
+        }
+      })
+      .catch((err) => sendResponse({ status: "error", error: String(err) }));
+    return true;
+  }
+
+  // Detach debugger from active tab (cleanup)
+  if (message?.type === "vcaa-cdp-detach") {
+    chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .then(async (tabs) => {
+        const tab = tabs[0];
+        if (tab?.id) {
+          await detachDebugger(tab.id);
+        }
+        sendResponse({ status: "ok" });
       })
       .catch((err) => sendResponse({ status: "error", error: String(err) }));
     return true;

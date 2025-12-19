@@ -1,11 +1,18 @@
-"""Navigator agent: ActionPlan + DOMMap -> ExecutionPlan."""
+"""Navigator agent: ActionPlan + DOMMap -> ExecutionPlan.
+
+This module supports two navigation modes:
+1. DOM-based (legacy): Uses DOMMap + optional LLM for element selection
+2. AX-tree-based (new): Uses Chrome Accessibility Tree for LLM-free navigation
+
+Set USE_ACCESSIBILITY_TREE=true to enable the new mode.
+"""
 
 from __future__ import annotations
 
 import logging
 import os
 import re
-from typing import Union
+from typing import Optional, Union
 
 from uagents import Agent, Bureau, Context
 
@@ -13,9 +20,15 @@ try:
     from agents.shared.asi_client import ASIClient
     from agents.shared.schemas import (
         ActionPlan,
+        AXElement,
+        AXExecutionPlan,
+        AXExecutionStep,
+        AXNavigationRequest,
+        AXTree,
         ClarificationRequest,
         DOMMap,
         ExecutionPlan,
+        Intent,
         NavigationRequest,
     )
     from agents.shared.utils import (
@@ -29,14 +42,28 @@ try:
         build_execution_plan_for_search_content,
         make_uuid,
     )
+    from agents.shared.ax_matcher import (
+        build_intent_from_action_plan,
+        find_action_button,
+        find_date_cell,
+        find_input_field,
+        match_element_by_intent,
+        pick_best_guess,
+    )
 except Exception:
     # Support running as a script (not as a package)
     from shared.asi_client import ASIClient
     from shared.schemas import (
         ActionPlan,
+        AXElement,
+        AXExecutionPlan,
+        AXExecutionStep,
+        AXNavigationRequest,
+        AXTree,
         ClarificationRequest,
         DOMMap,
         ExecutionPlan,
+        Intent,
         NavigationRequest,
     )
     from shared.utils import (
@@ -49,9 +76,18 @@ except Exception:
         build_execution_plan_for_search_content,
         make_uuid,
     )
+    from shared.ax_matcher import (
+        build_intent_from_action_plan,
+        find_action_button,
+        find_date_cell,
+        find_input_field,
+        match_element_by_intent,
+        pick_best_guess,
+    )
 
 
 NAVIGATOR_SEED = os.getenv("NAVIGATOR_SEED", "navigator-seed")
+USE_ACCESSIBILITY_TREE = os.getenv("USE_ACCESSIBILITY_TREE", "false").lower() in ("true", "1", "yes")
 logger = logging.getLogger(__name__)
 
 asi_client = ASIClient()
@@ -60,6 +96,301 @@ navigator_agent = Agent(
     seed=NAVIGATOR_SEED,
     endpoint=os.getenv("NAVIGATOR_ENDPOINT"),
 )
+
+
+# ============================================================================
+# Accessibility Tree-based Navigation (LLM-free)
+# ============================================================================
+
+
+async def build_ax_execution_plan(
+    nav_request: AXNavigationRequest,
+) -> Union[AXExecutionPlan, ClarificationRequest]:
+    """Build an execution plan using accessibility tree (no LLM).
+
+    This function matches user intent to accessible elements using heuristics
+    based on semantic roles and accessible names.
+    """
+    action = (nav_request.action_plan.action or "").lower()
+    entities = nav_request.action_plan.entities or {}
+    trace_id = nav_request.trace_id
+
+    # Build structured intent from action plan
+    intent = build_intent_from_action_plan(nav_request.action_plan)
+    ax_tree = nav_request.ax_tree
+
+    logger.info(
+        "AX Navigator processing action=%s, intent=%s (trace_id=%s)",
+        action, intent.dict(), trace_id
+    )
+
+    steps: list[AXExecutionStep] = []
+
+    # Handle different action types
+    if action in {"scroll", "scroll_page", "scroll_down", "scroll_up"}:
+        # Scroll doesn't need element matching - return special step
+        return AXExecutionPlan(
+            id=make_uuid(),
+            trace_id=trace_id,
+            steps=[
+                AXExecutionStep(
+                    step_id=f"s_scroll_{make_uuid()[:8]}",
+                    action_type="scroll",
+                    backend_node_id=0,  # Not used for scroll
+                    value=entities.get("direction", "down"),
+                    confidence=1.0,
+                )
+            ],
+        )
+
+    if action in {"history_back", "back", "go_back"}:
+        return AXExecutionPlan(
+            id=make_uuid(),
+            trace_id=trace_id,
+            steps=[
+                AXExecutionStep(
+                    step_id=f"s_back_{make_uuid()[:8]}",
+                    action_type="history_back",
+                    backend_node_id=0,
+                    confidence=1.0,
+                )
+            ],
+        )
+
+    if action in {"open_site", "navigate"}:
+        url = entities.get("url") or nav_request.action_plan.value
+        return AXExecutionPlan(
+            id=make_uuid(),
+            trace_id=trace_id,
+            steps=[
+                AXExecutionStep(
+                    step_id=f"s_navigate_{make_uuid()[:8]}",
+                    action_type="navigate",
+                    backend_node_id=0,
+                    value=url,
+                    confidence=1.0,
+                )
+            ],
+        )
+
+    # For complex actions, use intent-based matching
+    if action in {"search_flights", "flight_search", "search_hotels", "search_stays", "search_travel"}:
+        # Multi-step: origin -> destination -> dates -> search
+        steps = _build_search_form_steps(ax_tree, intent, trace_id)
+
+    elif action in {"search_content", "search", "search_site"}:
+        # Find search box, input query, optionally click search button
+        steps = _build_search_content_steps(ax_tree, intent, trace_id)
+
+    elif action in {"click_result", "click_item", "click"}:
+        # Find and click a specific element
+        match = match_element_by_intent(ax_tree, intent)
+        if match:
+            el, score = match
+            steps.append(
+                AXExecutionStep(
+                    step_id=f"s_click_{make_uuid()[:8]}",
+                    action_type="click",
+                    backend_node_id=el.backend_node_id,
+                    confidence=score,
+                    notes=f"Clicking {el.role}: {el.name[:50] if el.name else 'unnamed'}",
+                )
+            )
+
+    elif action in {"select_date", "pick_date"}:
+        # Date selection in calendar
+        if intent.date:
+            date_el = find_date_cell(ax_tree, intent.date)
+            if date_el:
+                steps.append(
+                    AXExecutionStep(
+                        step_id=f"s_date_{make_uuid()[:8]}",
+                        action_type="click",
+                        backend_node_id=date_el.backend_node_id,
+                        confidence=0.8,
+                        notes=f"Selecting date: {date_el.name}",
+                    )
+                )
+
+    elif action in {"input", "type", "fill"}:
+        # Input into a field
+        match = match_element_by_intent(ax_tree, intent)
+        if match:
+            el, score = match
+            steps.append(
+                AXExecutionStep(
+                    step_id=f"s_input_{make_uuid()[:8]}",
+                    action_type="input",
+                    backend_node_id=el.backend_node_id,
+                    value=intent.value or "",
+                    confidence=score,
+                    notes=f"Input into {el.role}: {el.name[:50] if el.name else 'unnamed'}",
+                )
+            )
+
+    # Fallback: try best-guess matching
+    if not steps:
+        match = match_element_by_intent(ax_tree, intent)
+        if match:
+            el, score = match
+            action_type = "input" if el.role in ["textbox", "combobox", "searchbox"] else "click"
+            steps.append(
+                AXExecutionStep(
+                    step_id=f"s_guess_{make_uuid()[:8]}",
+                    action_type=action_type,
+                    backend_node_id=el.backend_node_id,
+                    value=intent.value if action_type == "input" else None,
+                    confidence=score * 0.8,  # Reduce confidence for guesses
+                    notes=f"Best guess: {el.role} - {el.name[:50] if el.name else 'unnamed'}",
+                )
+            )
+        else:
+            # Last resort: pick any interactive element
+            el = pick_best_guess(ax_tree, intent)
+            if el:
+                action_type = "input" if el.role in ["textbox", "combobox", "searchbox"] else "click"
+                steps.append(
+                    AXExecutionStep(
+                        step_id=f"s_fallback_{make_uuid()[:8]}",
+                        action_type=action_type,
+                        backend_node_id=el.backend_node_id,
+                        value=intent.value if action_type == "input" else None,
+                        confidence=0.3,
+                        notes=f"Fallback: {el.role} - {el.name[:50] if el.name else 'unnamed'}",
+                    )
+                )
+
+    if not steps:
+        return ClarificationRequest(
+            id=make_uuid(),
+            trace_id=trace_id,
+            question="I could not find elements to act on.",
+            options=[],
+            reason="no_candidates",
+        )
+
+    logger.info("AX Navigator built %d steps (trace_id=%s)", len(steps), trace_id)
+    return AXExecutionPlan(
+        id=make_uuid(),
+        trace_id=trace_id,
+        steps=steps,
+    )
+
+
+def _build_search_form_steps(
+    ax_tree: AXTree, intent: Intent, trace_id: str
+) -> list[AXExecutionStep]:
+    """Build steps for filling a search form (flights, hotels, etc.)."""
+    steps: list[AXExecutionStep] = []
+
+    # Step 1: Origin (if provided)
+    if intent.origin:
+        origin_field = find_input_field(ax_tree, "origin")
+        if origin_field:
+            steps.append(
+                AXExecutionStep(
+                    step_id=f"s_origin_{make_uuid()[:8]}",
+                    action_type="input",
+                    backend_node_id=origin_field.backend_node_id,
+                    value=intent.origin,
+                    confidence=0.7,
+                    notes=f"Origin: {origin_field.name[:30] if origin_field.name else 'field'}",
+                )
+            )
+
+    # Step 2: Destination
+    if intent.location:
+        dest_field = find_input_field(ax_tree, "destination")
+        if dest_field:
+            steps.append(
+                AXExecutionStep(
+                    step_id=f"s_destination_{make_uuid()[:8]}",
+                    action_type="input",
+                    backend_node_id=dest_field.backend_node_id,
+                    value=intent.location,
+                    confidence=0.7,
+                    notes=f"Destination: {dest_field.name[:30] if dest_field.name else 'field'}",
+                )
+            )
+
+    # Step 3: Start date
+    if intent.date:
+        date_field = find_date_cell(ax_tree, intent.date)
+        if date_field:
+            steps.append(
+                AXExecutionStep(
+                    step_id=f"s_date_start_{make_uuid()[:8]}",
+                    action_type="click",
+                    backend_node_id=date_field.backend_node_id,
+                    confidence=0.8,
+                    notes=f"Start date: {date_field.name[:30] if date_field.name else 'cell'}",
+                )
+            )
+
+    # Step 4: End date (for return flights, checkout)
+    if intent.date_end:
+        date_end_field = find_date_cell(ax_tree, intent.date_end)
+        if date_end_field:
+            steps.append(
+                AXExecutionStep(
+                    step_id=f"s_date_end_{make_uuid()[:8]}",
+                    action_type="click",
+                    backend_node_id=date_end_field.backend_node_id,
+                    confidence=0.8,
+                    notes=f"End date: {date_end_field.name[:30] if date_end_field.name else 'cell'}",
+                )
+            )
+
+    # Step 5: Search button
+    search_btn = find_action_button(ax_tree, ["search", "find", "go"])
+    if search_btn:
+        steps.append(
+            AXExecutionStep(
+                step_id=f"s_search_{make_uuid()[:8]}",
+                action_type="click",
+                backend_node_id=search_btn.backend_node_id,
+                confidence=0.9,
+                notes=f"Search: {search_btn.name[:30] if search_btn.name else 'button'}",
+            )
+        )
+
+    return steps
+
+
+def _build_search_content_steps(
+    ax_tree: AXTree, intent: Intent, trace_id: str
+) -> list[AXExecutionStep]:
+    """Build steps for searching content (YouTube, Google, etc.)."""
+    steps: list[AXExecutionStep] = []
+
+    # Find search input
+    search_input = find_input_field(ax_tree, "search")
+    if search_input and intent.value:
+        steps.append(
+            AXExecutionStep(
+                step_id=f"s_search_input_{make_uuid()[:8]}",
+                action_type="input",
+                backend_node_id=search_input.backend_node_id,
+                value=intent.value,
+                confidence=0.8,
+                notes=f"Search input: {search_input.name[:30] if search_input.name else 'field'}",
+            )
+        )
+
+    # Find search button (optional - some sites submit on Enter)
+    search_btn = find_action_button(ax_tree, ["search", "go", "find"])
+    if search_btn:
+        steps.append(
+            AXExecutionStep(
+                step_id=f"s_search_btn_{make_uuid()[:8]}",
+                action_type="click",
+                backend_node_id=search_btn.backend_node_id,
+                confidence=0.7,
+                notes=f"Search button: {search_btn.name[:30] if search_btn.name else 'button'}",
+            )
+        )
+
+    return steps
 
 
 async def build_execution_plan(
@@ -182,6 +513,19 @@ async def handle_navigation(ctx: Context, msg: NavigationRequest):
     ctx.logger.info(
         "Navigator produced %s (trace_id=%s)",
         result.schema_version if hasattr(result, "schema_version") else "unknown",
+        msg.trace_id,
+    )
+
+
+@navigator_agent.on_message(model=AXNavigationRequest)
+async def handle_ax_navigation(ctx: Context, msg: AXNavigationRequest):
+    """Handle accessibility tree-based navigation (LLM-free)."""
+    result = await build_ax_execution_plan(msg)
+    await ctx.send(msg.sender, result)
+    ctx.logger.info(
+        "AX Navigator produced %s with %d steps (trace_id=%s)",
+        result.schema_version if hasattr(result, "schema_version") else "unknown",
+        len(result.steps) if hasattr(result, "steps") else 0,
         msg.trace_id,
     )
 
