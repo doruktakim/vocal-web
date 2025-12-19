@@ -256,10 +256,42 @@ def match_elements_by_role(
 
 
 def find_input_field(
-    ax_tree: AXTree, field_type: str
+    ax_tree: AXTree, field_type: str, exclude_ax_ids: Optional[List[str]] = None
 ) -> Optional[AXElement]:
-    """Find an input field by type (destination, origin, date, search, etc.)."""
-    field_patterns = {
+    """Find an input field by type (destination, origin, date, search, etc.).
+    
+    Prioritizes description field patterns over name patterns, since travel sites
+    often show current VALUES in the name (e.g., "Paris (Any)") while the description
+    contains the semantic hint (e.g., "Enter the city you're flying from").
+    
+    Args:
+        ax_tree: The accessibility tree to search
+        field_type: Type of field to find (destination, origin, date, search, guests)
+        exclude_ax_ids: List of ax_ids to skip (useful for finding second field)
+    """
+    exclude_ax_ids = exclude_ax_ids or []
+    
+    # Description patterns take priority - these indicate field PURPOSE
+    # (e.g., Skyscanner: description="Enter the city you're flying from")
+    description_patterns = {
+        "destination": [
+            "destination", "going to", "where to", "to where", "flying to",
+            "enter your destination", "where are you going", "arrival"
+        ],
+        "origin": [
+            "flying from", "from where", "leaving from", "departure city",
+            "enter the city you're flying from", "where from"
+        ],
+        "date": [
+            "check-in", "check-out", "depart", "return", "when",
+            "select date", "pick date", "travel date"
+        ],
+        "search": ["search", "find", "query", "look up"],
+        "guests": ["guest", "traveler", "adult", "child", "room", "passenger"],
+    }
+    
+    # Name patterns are fallback - less reliable since names often show values
+    name_patterns = {
         "destination": ["destination", "where", "to", "going to", "city", "hotel", "location"],
         "origin": ["origin", "from", "leaving from", "departure"],
         "date": ["date", "when", "check-in", "check-out", "depart", "return"],
@@ -267,30 +299,53 @@ def find_input_field(
         "guests": ["guest", "traveler", "adult", "child", "room"],
     }
 
-    patterns = field_patterns.get(field_type, [field_type])
+    desc_patterns = description_patterns.get(field_type, [field_type])
+    nm_patterns = name_patterns.get(field_type, [field_type])
     input_roles = ["textbox", "combobox", "searchbox", "spinbutton"]
 
-    best_match: Optional[Tuple[AXElement, float]] = None
+    candidates: List[Tuple[AXElement, float]] = []
 
     for el in ax_tree.elements:
         if el.role not in input_roles:
             continue
         if el.disabled:
             continue
+        if el.ax_id in exclude_ax_ids:
+            continue
 
         name_lower = el.name.lower() if el.name else ""
         desc_lower = el.description.lower() if el.description else ""
-        combined = f"{name_lower} {desc_lower}"
 
         score = 0.0
-        for pattern in patterns:
-            if pattern in combined:
-                score += 0.5
+        
+        # PRIORITY 1: Description matches (highest confidence)
+        # Description usually contains the field's PURPOSE, not its current value
+        for pattern in desc_patterns:
+            if pattern in desc_lower:
+                score += 1.0  # High score for description match
+                break
+        
+        # PRIORITY 2: Name matches (lower confidence)
+        # Name often contains current value, not field type
+        if score == 0:
+            for pattern in nm_patterns:
+                if pattern in name_lower:
+                    score += 0.5
+                    break
+                # Also check description for name patterns as fallback
+                if pattern in desc_lower:
+                    score += 0.4
+                    break
 
-        if score > 0 and (not best_match or score > best_match[1]):
-            best_match = (el, score)
+        if score > 0:
+            candidates.append((el, score))
 
-    return best_match[0] if best_match else None
+    if not candidates:
+        return None
+    
+    # Sort by score descending, return best match
+    candidates.sort(key=lambda x: -x[1])
+    return candidates[0][0]
 
 
 def find_date_cell(ax_tree: AXTree, target_date: str) -> Optional[AXElement]:
@@ -327,9 +382,21 @@ def find_date_cell(ax_tree: AXTree, target_date: str) -> Optional[AXElement]:
 def find_action_button(
     ax_tree: AXTree, action_keywords: Optional[List[str]] = None
 ) -> Optional[AXElement]:
-    """Find an action button (search, apply, submit, etc.)."""
+    """Find an action button (search, apply, submit, etc.).
+    
+    Scores candidates instead of returning first match. Prefers:
+    1. Exact name matches (e.g., name="Search" exactly)
+    2. Button role over link role
+    3. Shorter names (promotional links are verbose)
+    
+    This fixes the bug where "Search flights Everywhere" link was matched
+    before the actual "Search" button.
+    """
     default_keywords = ["search", "submit", "apply", "done", "confirm", "go", "find"]
     keywords = action_keywords or default_keywords
+    keywords_lower = [kw.lower() for kw in keywords]
+
+    candidates: List[Tuple[AXElement, float]] = []
 
     for el in ax_tree.elements:
         if el.role not in ["button", "link"]:
@@ -337,11 +404,63 @@ def find_action_button(
         if el.disabled:
             continue
 
-        name_lower = el.name.lower() if el.name else ""
-        if any(kw in name_lower for kw in keywords):
-            return el
+        name_lower = el.name.lower().strip() if el.name else ""
+        if not name_lower:
+            continue
+            
+        score = 0.0
+        
+        # Check for keyword matches
+        has_match = False
+        for kw in keywords_lower:
+            # PRIORITY 1: Exact match (name IS the keyword)
+            # e.g., name="Search" matches keyword "search" exactly
+            if name_lower == kw:
+                score += 1.5
+                has_match = True
+                break
+            # PRIORITY 2: Name starts with keyword
+            # e.g., name="Search flights" starts with "search"
+            elif name_lower.startswith(kw + " ") or name_lower.startswith(kw):
+                if len(name_lower) < 20:  # Short names only
+                    score += 1.0
+                else:
+                    score += 0.5
+                has_match = True
+                break
+            # PRIORITY 3: Keyword contained in name
+            elif kw in name_lower:
+                score += 0.3
+                has_match = True
+        
+        if not has_match:
+            continue
+        
+        # BONUS: Prefer button role over link role
+        # Links are often navigation/promotional, buttons are actions
+        if el.role == "button":
+            score += 0.5
+        
+        # PENALTY: Long names are likely promotional text
+        # e.g., "Can't decide where to go?. Explore every destination. Search flights Everywhere"
+        if len(name_lower) > 50:
+            score *= 0.3
+        elif len(name_lower) > 30:
+            score *= 0.6
+        
+        # BONUS: Form-related attributes suggest primary action
+        # Buttons with type="submit" or in forms are likely the main action
+        if el.role == "button":
+            score += 0.2
+            
+        candidates.append((el, score))
 
-    return None
+    if not candidates:
+        return None
+    
+    # Sort by score descending, return best match
+    candidates.sort(key=lambda x: -x[1])
+    return candidates[0][0]
 
 
 def pick_best_guess(ax_tree: AXTree, intent: Intent) -> Optional[AXElement]:

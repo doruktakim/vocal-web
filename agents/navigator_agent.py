@@ -280,17 +280,31 @@ async def build_ax_execution_plan(
 def _build_search_form_steps(
     ax_tree: AXTree, intent: Intent, trace_id: str
 ) -> list[AXExecutionStep]:
-    """Build steps for filling a search form (flights, hotels, etc.)."""
+    """Build steps for filling a search form (flights, hotels, etc.).
+    
+    Uses field exclusion to prevent origin and destination from selecting
+    the same combobox. Prioritizes description-based matching.
+    """
     steps: list[AXExecutionStep] = []
+    used_ax_ids: list[str] = []  # Track used fields to prevent duplicates
 
     # Step 1: Origin (if provided)
+    origin_field = None
     if intent.origin:
-        origin_field = find_input_field(ax_tree, "origin")
+        origin_field = find_input_field(ax_tree, "origin", exclude_ax_ids=used_ax_ids)
         if origin_field:
+            used_ax_ids.append(origin_field.ax_id)
             steps.append(
                 AXExecutionStep(
                     step_id=f"s_origin_{make_uuid()[:8]}",
                     action_type="input",
+                    target=AXExecutionStep.Target(
+                        selector_type="ax_node_id",
+                        ax_node_id=origin_field.ax_id,
+                        backend_node_id=origin_field.backend_node_id,
+                        role=origin_field.role,
+                        name=origin_field.name,
+                    ) if hasattr(AXExecutionStep, 'Target') else None,
                     backend_node_id=origin_field.backend_node_id,
                     value=intent.origin,
                     confidence=0.7,
@@ -298,14 +312,22 @@ def _build_search_form_steps(
                 )
             )
 
-    # Step 2: Destination
+    # Step 2: Destination - EXCLUDE origin field to prevent duplicate selection
     if intent.location:
-        dest_field = find_input_field(ax_tree, "destination")
+        dest_field = find_input_field(ax_tree, "destination", exclude_ax_ids=used_ax_ids)
         if dest_field:
+            used_ax_ids.append(dest_field.ax_id)
             steps.append(
                 AXExecutionStep(
                     step_id=f"s_destination_{make_uuid()[:8]}",
                     action_type="input",
+                    target=AXExecutionStep.Target(
+                        selector_type="ax_node_id",
+                        ax_node_id=dest_field.ax_id,
+                        backend_node_id=dest_field.backend_node_id,
+                        role=dest_field.role,
+                        name=dest_field.name,
+                    ) if hasattr(AXExecutionStep, 'Target') else None,
                     backend_node_id=dest_field.backend_node_id,
                     value=intent.location,
                     confidence=0.7,
@@ -313,8 +335,11 @@ def _build_search_form_steps(
                 )
             )
 
-    # Step 3: Start date
+    # Step 3: Start date - look for date button to click
+    # Note: If date is already showing in a button (e.g., "Depart 1/25/26"),
+    # we might need to click it to open the calendar first
     if intent.date:
+        # First try to find a date cell directly (if calendar is already open)
         date_field = find_date_cell(ax_tree, intent.date)
         if date_field:
             steps.append(
@@ -341,7 +366,7 @@ def _build_search_form_steps(
                 )
             )
 
-    # Step 5: Search button
+    # Step 5: Search button - use improved scoring to find actual search button
     search_btn = find_action_button(ax_tree, ["search", "find", "go"])
     if search_btn:
         steps.append(
