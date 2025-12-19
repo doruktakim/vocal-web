@@ -397,10 +397,89 @@
     return Boolean(value);
   }
 
+  function normalizeText(value) {
+    if (!value) return "";
+    return String(value).replace(/\s+/g, " ").trim();
+  }
+
+  function getAriaLabelledByText(el) {
+    const ids = normalizeText(el.getAttribute("aria-labelledby"));
+    if (!ids) return "";
+    return ids
+      .split(/\s+/)
+      .map((id) => normalizeText(document.getElementById(id)?.innerText))
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  function getAssociatedLabelText(el) {
+    const id = el.getAttribute("id");
+    if (id) {
+      const label = document.querySelector(`label[for=\"${CSS.escape(id)}\"]`);
+      if (label) return normalizeText(label.innerText);
+    }
+    const wrappingLabel = el.closest("label");
+    if (wrappingLabel) return normalizeText(wrappingLabel.innerText);
+    return "";
+  }
+
+  function hasTextValue(el) {
+    const text = normalizeText(el.innerText);
+    return text.length > 0;
+  }
+
+  function hasTestId(el) {
+    return (
+      el.hasAttribute("data-testid") ||
+      el.hasAttribute("data-test") ||
+      el.hasAttribute("data-qa") ||
+      el.hasAttribute("data-cy")
+    );
+  }
+
+  function isInteractiveRole(role) {
+    if (!role) return false;
+    const normalized = role.toLowerCase();
+    return [
+      "button",
+      "textbox",
+      "searchbox",
+      "combobox",
+      "option",
+      "listitem",
+      "menuitem",
+      "gridcell",
+      "tab",
+      "link",
+    ].includes(normalized);
+  }
+
+  function isCandidateElement(el) {
+    const tag = (el.tagName || "").toLowerCase();
+    if (!tag || ["script", "style", "meta", "link"].includes(tag)) return false;
+
+    if (["input", "button", "select", "textarea", "a"].includes(tag)) return true;
+
+    const role = el.getAttribute("role");
+    if (isInteractiveRole(role)) return true;
+
+    if (el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby")) return true;
+    if (el.hasAttribute("placeholder") || el.hasAttribute("name")) return true;
+    if (hasTestId(el)) return true;
+
+    if (el.tabIndex >= 0 && hasTextValue(el)) return true;
+
+    const texty = hasTextValue(el);
+    if (!texty) return false;
+
+    const inListbox = el.closest("[role='listbox'],[role='menu'],[role='grid']");
+    if (inListbox && ["div", "span", "li", "td"].includes(tag)) return true;
+
+    return false;
+  }
+
   function captureDomMap() {
-    // Include common form controls plus grid cells (e.g., calendar dates), traversing shadow DOMs.
-    const selector =
-      "input, button, select, textarea, a, [role='button'], [role='textbox'], [role='option'], li[role='option'], [role='gridcell'], td[role='gridcell'], div[role='gridcell'], [aria-label]";
+    // Prioritize interactive elements while including likely options/date cells with visible text.
     const candidates = [];
     const seen = new Set();
     const stack = [document];
@@ -411,7 +490,7 @@
         if (el.shadowRoot) {
           stack.push(el.shadowRoot);
         }
-        if (el.matches && el.matches(selector)) {
+        if (el.matches && isCandidateElement(el)) {
           if (!seen.has(el)) {
             seen.add(el);
             candidates.push(el);
@@ -432,6 +511,14 @@
       const rawValue = el.value;
       const normalizedValue =
         rawValue === undefined || rawValue === null || rawValue === "" ? null : rawValue;
+      const ariaLabelledByText = getAriaLabelledByText(el);
+      const associatedLabel = getAssociatedLabelText(el);
+      const dataset = { ...el.dataset };
+      if (associatedLabel) {
+        dataset.vcaaLabel = associatedLabel;
+      } else if (ariaLabelledByText) {
+        dataset.vcaaLabel = ariaLabelledByText;
+      }
       elements.push({
         element_id: elementId,
         tag: el.tagName.toLowerCase(),
@@ -456,7 +543,7 @@
         },
         visible: rect.width > 0 && rect.height > 0,
         enabled: !el.disabled,
-        dataset: { ...el.dataset },
+        dataset,
         score_hint: 0.0,
         is_sensitive: elementIsSensitive,
         has_value: hasElementValue(el),
