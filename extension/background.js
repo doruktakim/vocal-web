@@ -1,6 +1,28 @@
 const DEFAULT_API_BASE = "http://localhost:8081";
 const CONTENT_SCRIPT_FILE = "content.js";
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
+const AX_RECORDING_TEMP_FEATURES = true;
+
+const AX_RECORDING_STORAGE_KEYS = {
+  AGENT_PREFIX: "axrec_agent:",
+  HUMAN_ACTIVE: "axrec_human:active",
+  HUMAN_PREFIX: "axrec_human:",
+};
+
+const AX_CAPTURE_CONTEXT = {
+  method: "Accessibility.getFullAXTree",
+  notes: "CDP Accessibility.getFullAXTree depth=15",
+};
+
+const agentRecorders = new Map();
+let humanRecordingState = {
+  active: false,
+  sessionId: null,
+  recording: null,
+  enrolledTabs: new Set(),
+  promptText: "",
+  startedAt: null,
+};
 
 // ============================================================================
 // Session Storage Keys for Pending Execution Plans
@@ -157,6 +179,519 @@ async function clearPendingPlan(tabId) {
   const key = `${SESSION_STORAGE_KEYS.PENDING_PLAN}_${tabId}`;
   await chrome.storage.session.remove([key]);
   console.log(`[VCAA] Cleared pending plan for tab ${tabId}`);
+}
+
+// ============================================================================
+// Temporary AX Recording Helpers
+// ============================================================================
+
+const getRecordingLocale = () => {
+  try {
+    return chrome.i18n.getUILanguage();
+  } catch (err) {
+    return "unknown";
+  }
+};
+
+function formatRecordingTimestamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+  return `${year}${month}${day}-${hours}${minutes}${seconds}`;
+}
+
+function buildRecordingBase({ mode, id, promptType, promptText }) {
+  const now = new Date().toISOString();
+  return {
+    schema_version: "recording_v1",
+    mode,
+    id,
+    created_at: now,
+    ended_at: null,
+    prompt: {
+      type: promptType,
+      text: promptText || "",
+      locale: getRecordingLocale(),
+    },
+    context: {
+      extension_version: chrome.runtime.getManifest().version,
+      ax_capture: {
+        method: AX_CAPTURE_CONTEXT.method,
+        notes: AX_CAPTURE_CONTEXT.notes,
+      },
+    },
+    timeline: [],
+    summary: {
+      urls: [],
+      action_count: 0,
+      ax_snapshot_count: 0,
+      ended_reason: null,
+    },
+  };
+}
+
+function addUrlToSummary(recording, url) {
+  if (!url) {
+    return;
+  }
+  const urls = recording.summary?.urls || [];
+  if (!urls.includes(url)) {
+    urls.push(url);
+  }
+  recording.summary.urls = urls;
+}
+
+function appendTimelineEntry(recording, entry) {
+  if (!recording.timeline) {
+    recording.timeline = [];
+  }
+  recording.timeline.push(entry);
+  if (!recording.summary) {
+    recording.summary = { urls: [], action_count: 0, ax_snapshot_count: 0, ended_reason: null };
+  }
+  if (entry.kind === "ax_snapshot") {
+    recording.summary.ax_snapshot_count += 1;
+    addUrlToSummary(recording, entry.url || entry.snapshot?.page_url);
+  }
+  if (entry.kind === "decision" || entry.kind === "human_action") {
+    recording.summary.action_count += 1;
+    addUrlToSummary(recording, entry.url);
+  }
+  if (entry.kind === "navigation") {
+    addUrlToSummary(recording, entry.url);
+  }
+}
+
+async function persistRecording(key, recording) {
+  await chrome.storage.session.set({ [key]: recording });
+}
+
+function buildDownloadFilename(mode, id) {
+  const stamp = formatRecordingTimestamp(new Date());
+  return mode === "agent"
+    ? `vw-ax-agent-${id}-${stamp}.json`
+    : `vw-ax-human-${id}-${stamp}.json`;
+}
+
+async function downloadRecording(recording, storageKey) {
+  const filename = buildDownloadFilename(recording.mode, recording.id);
+  const payload = JSON.stringify(recording, null, 2);
+  const url = `data:application/json;charset=utf-8,${encodeURIComponent(payload)}`;
+  return new Promise((resolve) => {
+    chrome.downloads.download({ url, filename, saveAs: false }, async (downloadId) => {
+      if (chrome.runtime.lastError || !downloadId) {
+        console.warn("[VCAA] Failed to download AX recording", chrome.runtime.lastError);
+        resolve(false);
+        return;
+      }
+      await chrome.storage.session.remove([storageKey]);
+      resolve(true);
+    });
+  });
+}
+
+async function getAgentRecorder(traceId) {
+  if (!AX_RECORDING_TEMP_FEATURES || !traceId) {
+    return null;
+  }
+  if (agentRecorders.has(traceId)) {
+    return agentRecorders.get(traceId);
+  }
+  const key = `${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`;
+  const stored = await chrome.storage.session.get([key]);
+  if (stored[key]) {
+    const recorder = { traceId, recording: stored[key] };
+    agentRecorders.set(traceId, recorder);
+    return recorder;
+  }
+  return null;
+}
+
+async function startAgentRecording(traceId, transcript) {
+  if (!AX_RECORDING_TEMP_FEATURES || !traceId) {
+    return null;
+  }
+  const existing = await getAgentRecorder(traceId);
+  if (existing) {
+    return existing;
+  }
+  const recording = buildRecordingBase({
+    mode: "agent",
+    id: traceId,
+    promptType: "agent_transcript",
+    promptText: transcript,
+  });
+  const recorder = { traceId, recording };
+  agentRecorders.set(traceId, recorder);
+  await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recording);
+  return recorder;
+}
+
+function buildTargetFromAxMatch(axMatch, fallback = {}) {
+  if (axMatch) {
+    return {
+      selector_type: "ax_node_id",
+      ax_node_id: axMatch.ax_id,
+      backend_node_id: axMatch.backend_node_id,
+      role: axMatch.role,
+      name: axMatch.name,
+    };
+  }
+  return {
+    selector_type: fallback.selector_type || "unknown",
+    ax_node_id: fallback.ax_node_id || null,
+    backend_node_id: fallback.backend_node_id || null,
+    role: fallback.role || null,
+    name: fallback.name || null,
+    css_selector: fallback.css_selector || null,
+  };
+}
+
+function resolveAxMatch(axTree, backendNodeId) {
+  if (!axTree?.elements || !backendNodeId) {
+    return null;
+  }
+  return axTree.elements.find((el) => el.backend_node_id === backendNodeId) || null;
+}
+
+async function appendAgentAxSnapshot(traceId, axTree, tabId) {
+  const recorder = await getAgentRecorder(traceId);
+  if (!recorder) {
+    return;
+  }
+  const entry = {
+    t: new Date().toISOString(),
+    kind: "ax_snapshot",
+    url: axTree?.page_url || null,
+    tab_id: tabId,
+    snapshot: axTree,
+  };
+  appendTimelineEntry(recorder.recording, entry);
+  await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
+}
+
+async function appendAgentDecisions(traceId, executionPlan, axTree) {
+  const recorder = await getAgentRecorder(traceId);
+  if (!recorder || !executionPlan?.steps?.length) {
+    return;
+  }
+  const now = new Date().toISOString();
+  for (const step of executionPlan.steps) {
+    const match = resolveAxMatch(axTree, step.backend_node_id);
+    const target = buildTargetFromAxMatch(match, {
+      selector_type: step.backend_node_id ? "backend_node_id" : "none",
+      backend_node_id: step.backend_node_id || null,
+    });
+    const entry = {
+      t: now,
+      kind: "decision",
+      source: "agent",
+      step: {
+        step_id: step.step_id,
+        action_type: step.action_type,
+        target,
+        value: step.value ?? null,
+        timeout_ms: step.timeout_ms ?? null,
+        retries: step.retries ?? 0,
+      },
+      confidence: step.confidence ?? null,
+      notes: step.notes ?? null,
+    };
+    appendTimelineEntry(recorder.recording, entry);
+  }
+  await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
+}
+
+async function appendAgentResults(traceId, execResult) {
+  const recorder = await getAgentRecorder(traceId);
+  if (!recorder || !execResult?.step_results?.length) {
+    return;
+  }
+  for (const result of execResult.step_results) {
+    const entry = {
+      t: new Date().toISOString(),
+      kind: "action_result",
+      source: "agent",
+      step_id: result.step_id,
+      status: result.status,
+      error: result.error ?? null,
+      duration_ms: result.duration_ms ?? null,
+    };
+    appendTimelineEntry(recorder.recording, entry);
+  }
+  await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
+}
+
+async function appendAgentNavigation(traceId, url, reason, tabId) {
+  const recorder = await getAgentRecorder(traceId);
+  if (!recorder || !url) {
+    return;
+  }
+  const entry = {
+    t: new Date().toISOString(),
+    kind: "navigation",
+    url,
+    tab_id: tabId ?? null,
+    reason: reason || null,
+  };
+  appendTimelineEntry(recorder.recording, entry);
+  await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
+}
+
+async function finishAgentRecording(traceId, endedReason) {
+  const recorder = await getAgentRecorder(traceId);
+  if (!recorder) {
+    return;
+  }
+  recorder.recording.ended_at = new Date().toISOString();
+  recorder.recording.summary.ended_reason = endedReason || "completed";
+  await downloadRecording(
+    recorder.recording,
+    `${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`
+  );
+  agentRecorders.delete(traceId);
+}
+
+async function persistHumanActiveState() {
+  if (!humanRecordingState.active) {
+    await chrome.storage.session.remove([AX_RECORDING_STORAGE_KEYS.HUMAN_ACTIVE]);
+    return;
+  }
+  await chrome.storage.session.set({
+    [AX_RECORDING_STORAGE_KEYS.HUMAN_ACTIVE]: {
+      session_id: humanRecordingState.sessionId,
+      prompt_text: humanRecordingState.promptText,
+      started_at: humanRecordingState.startedAt,
+      enrolled_tabs: Array.from(humanRecordingState.enrolledTabs),
+    },
+  });
+}
+
+async function getHumanRecording() {
+  if (!humanRecordingState.active || !humanRecordingState.sessionId) {
+    return null;
+  }
+  if (humanRecordingState.recording) {
+    return humanRecordingState.recording;
+  }
+  const key = `${AX_RECORDING_STORAGE_KEYS.HUMAN_PREFIX}${humanRecordingState.sessionId}`;
+  const stored = await chrome.storage.session.get([key]);
+  if (stored[key]) {
+    humanRecordingState.recording = stored[key];
+    return stored[key];
+  }
+  return null;
+}
+
+async function persistHumanRecording(recording) {
+  if (!humanRecordingState.sessionId) {
+    return;
+  }
+  const key = `${AX_RECORDING_STORAGE_KEYS.HUMAN_PREFIX}${humanRecordingState.sessionId}`;
+  await persistRecording(key, recording);
+}
+
+async function appendHumanAxSnapshot(axTree, tabId) {
+  const recording = await getHumanRecording();
+  if (!recording) {
+    return;
+  }
+  const entry = {
+    t: new Date().toISOString(),
+    kind: "ax_snapshot",
+    url: axTree?.page_url || null,
+    tab_id: tabId,
+    snapshot: axTree,
+  };
+  appendTimelineEntry(recording, entry);
+  await persistHumanRecording(recording);
+}
+
+async function appendHumanAction(eventPayload, target, tabId) {
+  const recording = await getHumanRecording();
+  if (!recording) {
+    return;
+  }
+  const entry = {
+    t: eventPayload.timestamp || new Date().toISOString(),
+    kind: "human_action",
+    source: "human",
+    step: {
+      step_id: eventPayload.event_id || crypto.randomUUID(),
+      action_type: eventPayload.action_type,
+      target,
+      value: eventPayload.value ?? null,
+      timeout_ms: null,
+      retries: 0,
+    },
+    url: eventPayload.url || null,
+    tab_id: tabId ?? null,
+  };
+  appendTimelineEntry(recording, entry);
+  await persistHumanRecording(recording);
+}
+
+async function resolveBackendNodeId(tabId, selector) {
+  if (!selector) {
+    return null;
+  }
+  try {
+    const documentResult = await sendCDPCommand(tabId, "DOM.getDocument", { depth: 0 });
+    const rootId = documentResult?.root?.nodeId;
+    if (!rootId) {
+      return null;
+    }
+    const queryResult = await sendCDPCommand(tabId, "DOM.querySelector", {
+      nodeId: rootId,
+      selector,
+    });
+    const nodeId = queryResult?.nodeId;
+    if (!nodeId) {
+      return null;
+    }
+    const node = await sendCDPCommand(tabId, "DOM.describeNode", { nodeId });
+    return node?.node?.backendNodeId || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function resolveBackendNodeIdFromRect(tabId, rect) {
+  if (!rect) {
+    return null;
+  }
+  try {
+    const x = Math.round(rect.x + rect.width / 2);
+    const y = Math.round(rect.y + rect.height / 2);
+    const hit = await sendCDPCommand(tabId, "DOM.getNodeForLocation", {
+      x,
+      y,
+      includeUserAgentShadowDOM: true,
+      ignorePointerEventsNone: true,
+    });
+    if (hit?.backendNodeId) {
+      return hit.backendNodeId;
+    }
+    if (hit?.nodeId) {
+      const node = await sendCDPCommand(tabId, "DOM.describeNode", { nodeId: hit.nodeId });
+      return node?.node?.backendNodeId || null;
+    }
+  } catch (err) {
+    return null;
+  }
+  return null;
+}
+
+async function resolveHumanActionTarget(tabId, eventPayload, axTree) {
+  const selector = eventPayload?.target?.selector || null;
+  const rect = eventPayload?.target?.bounding_rect || null;
+  const backendNodeId =
+    (await resolveBackendNodeId(tabId, selector)) ||
+    (await resolveBackendNodeIdFromRect(tabId, rect));
+  const axMatch = resolveAxMatch(axTree, backendNodeId);
+  const fallback = {
+    selector_type: selector ? "css_selector" : "unknown",
+    backend_node_id: backendNodeId,
+    role: eventPayload?.target?.role || null,
+    name: eventPayload?.target?.name || eventPayload?.target?.aria_label || null,
+    css_selector: selector,
+  };
+  return buildTargetFromAxMatch(axMatch, fallback);
+}
+
+async function setHumanRecordingEnabled(tabId, enabled) {
+  try {
+    await sendMessageWithInjection(tabId, {
+      type: "vw-axrec-human-enable",
+      enabled: Boolean(enabled),
+    });
+  } catch (err) {
+    if (!isMissingReceiverError(err)) {
+      console.warn("[VCAA] Failed to toggle human AX recording", err);
+    }
+  }
+}
+
+async function enrollHumanTab(tabId) {
+  if (!humanRecordingState.active || !tabId) {
+    return;
+  }
+  if (humanRecordingState.enrolledTabs.has(tabId)) {
+    return;
+  }
+  humanRecordingState.enrolledTabs.add(tabId);
+  await persistHumanActiveState();
+  await setHumanRecordingEnabled(tabId, true);
+}
+
+async function captureHumanSnapshotForTab(tabId) {
+  if (!humanRecordingState.active || !tabId) {
+    return null;
+  }
+  try {
+    const axTree = await collectAccessibilityTree(tabId, humanRecordingState.sessionId);
+    await appendHumanAxSnapshot(axTree, tabId);
+    return axTree;
+  } catch (err) {
+    console.warn("[VCAA] Failed to capture human AX snapshot", err);
+    return null;
+  }
+}
+
+async function stopHumanRecording(activeTabId) {
+  if (!humanRecordingState.active || !humanRecordingState.sessionId) {
+    return { status: "error", error: "No active human recording session." };
+  }
+  if (activeTabId) {
+    await captureHumanSnapshotForTab(activeTabId);
+  }
+  const recording = await getHumanRecording();
+  if (recording) {
+    recording.ended_at = new Date().toISOString();
+    recording.summary.ended_reason = "stopped";
+    await downloadRecording(
+      recording,
+      `${AX_RECORDING_STORAGE_KEYS.HUMAN_PREFIX}${humanRecordingState.sessionId}`
+    );
+  }
+  const enrolledTabs = Array.from(humanRecordingState.enrolledTabs);
+  humanRecordingState = {
+    active: false,
+    sessionId: null,
+    recording: null,
+    enrolledTabs: new Set(),
+    promptText: "",
+    startedAt: null,
+  };
+  await chrome.storage.session.remove([AX_RECORDING_STORAGE_KEYS.HUMAN_ACTIVE]);
+  for (const tabId of enrolledTabs) {
+    await setHumanRecordingEnabled(tabId, false);
+    await detachDebugger(tabId);
+  }
+  return { status: "ok" };
+}
+
+async function loadHumanRecordingState() {
+  if (!AX_RECORDING_TEMP_FEATURES) {
+    return;
+  }
+  const stored = await chrome.storage.session.get([AX_RECORDING_STORAGE_KEYS.HUMAN_ACTIVE]);
+  const activeState = stored[AX_RECORDING_STORAGE_KEYS.HUMAN_ACTIVE];
+  if (!activeState?.session_id) {
+    return;
+  }
+  humanRecordingState.active = true;
+  humanRecordingState.sessionId = activeState.session_id;
+  humanRecordingState.promptText = activeState.prompt_text || "";
+  humanRecordingState.startedAt = activeState.started_at || null;
+  humanRecordingState.enrolledTabs = new Set(activeState.enrolled_tabs || []);
+  for (const tabId of humanRecordingState.enrolledTabs) {
+    await setHumanRecordingEnabled(tabId, true);
+  }
 }
 
 const stripTrailingSlash = (value) => {
@@ -806,161 +1341,183 @@ async function runDemoFlowInternalAX(
   clarificationResponse,
   clarificationHistory = []
 ) {
-  // FAST PATH: Check for simple commands first (only on fresh commands)
-  if (!clarificationResponse) {
-    const fastCommand = matchFastCommand(transcript);
-    if (fastCommand) {
-      console.log("[VCAA-AX] Fast path: executing", fastCommand.type);
-      const result = await sendMessageWithInjection(tabId, {
-        type: "fast-command",
-        action: fastCommand
-      });
-      return {
-        status: "completed",
-        fastPath: true,
-        action: fastCommand,
-        execResult: result
-      };
-    }
-  }
-
-  const { apiBase } = await resolveApiConfig();
-  const traceId = crypto.randomUUID();
-
-  // Attach debugger for AX tree access
-  await attachDebugger(tabId);
-
-  // Collect AX tree instead of DOMMap
-  let axTree = await collectAccessibilityTree(tabId, traceId);
-
-  // Get action plan from interpreter
-  const actionPlan = await fetchActionPlan(
-    apiBase,
-    transcript,
-    traceId,
-    axTree, // Use axTree as page context
-    clarificationResponse,
-    clarificationHistory
-  );
-
-  if (actionPlan.schema_version === "clarification_v1") {
-    if (shouldAskHumanClarification(actionPlan)) {
-      return { status: "needs_clarification", actionPlan, domMap: axTree };
-    }
-    // For AX mode, we can't easily do fallback clicks, return clarification
-    return { status: "needs_clarification", actionPlan, domMap: axTree };
-  }
-
-  // Check if we need to navigate first
-  const desiredUrl = actionPlan?.entities?.url || actionPlan?.value;
-  const currentUrl = axTree?.page_url || "";
-  const needsNavigation = desiredUrl && !currentUrl.includes(desiredUrl.replace(/^https?:\/\//, "").split("/")[0]);
-
-  if (needsNavigation) {
-    console.log(`[VCAA-AX] Navigation needed to: ${desiredUrl}`);
-    
-    // Save pending plan BEFORE navigation
-    await savePendingPlan(tabId, {
-      traceId,
-      actionPlan,
-      transcript,
-      apiBase,
-      useAccessibilityTree: true,
-      savedAt: Date.now(),
-    });
-    pendingNavigationTabs.set(tabId, true);
-
-    // Navigate using chrome.tabs.update (cleaner than content script)
-    await chrome.tabs.update(tabId, { url: desiredUrl });
-
-    // Return immediately - the webNavigation listener will resume
-    return {
-      status: "navigating",
-      message: `Navigating to ${desiredUrl}. Actions will continue after page loads.`,
-      actionPlan,
-    };
-  }
-
-  // No navigation needed, proceed with execution
-  let executionPlan = null;
-  let execResult = null;
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    // Fetch execution plan using AX tree
-    executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId);
-
-    if (executionPlan.schema_version === "clarification_v1") {
-      if (shouldAskHumanClarification(executionPlan)) {
-        return { status: "needs_clarification", executionPlan, domMap: axTree };
-      }
-      return { status: "needs_clarification", executionPlan, domMap: axTree };
-    }
-
-    // Check if the plan contains navigation steps
-    const navStep = (executionPlan.steps || []).find(
-      (s) => s.action_type === "navigate" || s.action_type === "open_site"
-    );
-
-    if (navStep && navStep.value) {
-      console.log(`[VCAA-AX] Plan contains navigation step to: ${navStep.value}`);
-      
-      // Remove the nav step and save remaining steps as pending
-      const remainingSteps = (executionPlan.steps || []).filter((s) => s !== navStep);
-      
-      if (remainingSteps.length > 0) {
-        // Create a modified action plan for post-navigation
-        await savePendingPlan(tabId, {
-          traceId,
-          actionPlan,
-          transcript,
-          apiBase,
-          useAccessibilityTree: true,
-          savedAt: Date.now(),
+  let traceId = null;
+  try {
+    // FAST PATH: Check for simple commands first (only on fresh commands)
+    if (!clarificationResponse) {
+      const fastCommand = matchFastCommand(transcript);
+      if (fastCommand) {
+        console.log("[VCAA-AX] Fast path: executing", fastCommand.type);
+        const result = await sendMessageWithInjection(tabId, {
+          type: "fast-command",
+          action: fastCommand
         });
-        pendingNavigationTabs.set(tabId, true);
-      }
-
-      // Execute navigation
-      await chrome.tabs.update(tabId, { url: navStep.value });
-
-      if (remainingSteps.length > 0) {
         return {
-          status: "navigating",
-          message: `Navigating to ${navStep.value}. Actions will continue after page loads.`,
-          actionPlan,
-          executionPlan,
+          status: "completed",
+          fastPath: true,
+          action: fastCommand,
+          execResult: result
         };
       }
-      
-      // Only navigation was in the plan
-      return {
-        status: "completed",
+    }
+
+    const { apiBase } = await resolveApiConfig();
+    traceId = crypto.randomUUID();
+    await startAgentRecording(traceId, transcript);
+
+    // Attach debugger for AX tree access
+    await attachDebugger(tabId);
+
+    // Collect AX tree instead of DOMMap
+    let axTree = await collectAccessibilityTree(tabId, traceId);
+
+    // Get action plan from interpreter
+    const actionPlan = await fetchActionPlan(
+      apiBase,
+      transcript,
+      traceId,
+      axTree, // Use axTree as page context
+      clarificationResponse,
+      clarificationHistory
+    );
+
+    if (actionPlan.schema_version === "clarification_v1") {
+      await finishAgentRecording(traceId, "clarification");
+      if (shouldAskHumanClarification(actionPlan)) {
+        return { status: "needs_clarification", actionPlan, domMap: axTree };
+      }
+      // For AX mode, we can't easily do fallback clicks, return clarification
+      return { status: "needs_clarification", actionPlan, domMap: axTree };
+    }
+
+    // Check if we need to navigate first
+    const desiredUrl = actionPlan?.entities?.url || actionPlan?.value;
+    const currentUrl = axTree?.page_url || "";
+    const needsNavigation =
+      desiredUrl && !currentUrl.includes(desiredUrl.replace(/^https?:\/\//, "").split("/")[0]);
+
+    if (needsNavigation) {
+      console.log(`[VCAA-AX] Navigation needed to: ${desiredUrl}`);
+      await appendAgentNavigation(traceId, desiredUrl, "action_plan_navigation", tabId);
+
+      // Save pending plan BEFORE navigation
+      await savePendingPlan(tabId, {
+        traceId,
         actionPlan,
-        executionPlan,
-        execResult: {
-          step_results: [{ step_id: navStep.step_id, status: "success" }],
-          status: "success",
-        },
+        transcript,
+        apiBase,
+        useAccessibilityTree: true,
+        savedAt: Date.now(),
+      });
+      pendingNavigationTabs.set(tabId, true);
+
+      // Navigate using chrome.tabs.update (cleaner than content script)
+      await chrome.tabs.update(tabId, { url: desiredUrl });
+
+      // Return immediately - the webNavigation listener will resume
+      return {
+        status: "navigating",
+        message: `Navigating to ${desiredUrl}. Actions will continue after page loads.`,
+        actionPlan,
       };
     }
 
-    // Execute non-navigation steps via CDP
-    execResult = await executeAxPlanViaCDP(tabId, executionPlan, traceId);
-    await sendExecutionResult(apiBase, execResult);
+    // No navigation needed, proceed with execution
+    let executionPlan = null;
+    let execResult = null;
 
-    const executionErrors = execResult?.errors || [];
-    if (executionErrors.length) {
-      console.warn("[VCAA-AX] Execution errors detected", { traceId, errors: executionErrors });
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      axTree = await collectAccessibilityTree(tabId, traceId);
-      continue;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // Fetch execution plan using AX tree
+      executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId);
+
+      if (executionPlan.schema_version === "clarification_v1") {
+        await finishAgentRecording(traceId, "clarification");
+        if (shouldAskHumanClarification(executionPlan)) {
+          return { status: "needs_clarification", executionPlan, domMap: axTree };
+        }
+        return { status: "needs_clarification", executionPlan, domMap: axTree };
+      }
+
+      await appendAgentDecisions(traceId, executionPlan, axTree);
+
+      // Check if the plan contains navigation steps
+      const navStep = (executionPlan.steps || []).find(
+        (s) => s.action_type === "navigate" || s.action_type === "open_site"
+      );
+
+      if (navStep && navStep.value) {
+        console.log(`[VCAA-AX] Plan contains navigation step to: ${navStep.value}`);
+        await appendAgentNavigation(traceId, navStep.value, "execution_plan_navigation", tabId);
+
+        // Remove the nav step and save remaining steps as pending
+        const remainingSteps = (executionPlan.steps || []).filter((s) => s !== navStep);
+
+        if (remainingSteps.length > 0) {
+          // Create a modified action plan for post-navigation
+          await savePendingPlan(tabId, {
+            traceId,
+            actionPlan,
+            transcript,
+            apiBase,
+            useAccessibilityTree: true,
+            savedAt: Date.now(),
+          });
+          pendingNavigationTabs.set(tabId, true);
+        }
+
+        // Execute navigation
+        await chrome.tabs.update(tabId, { url: navStep.value });
+
+        if (remainingSteps.length > 0) {
+          return {
+            status: "navigating",
+            message: `Navigating to ${navStep.value}. Actions will continue after page loads.`,
+            actionPlan,
+            executionPlan,
+          };
+        }
+
+        // Only navigation was in the plan
+        execResult = {
+          step_results: [{ step_id: navStep.step_id, status: "success" }],
+          status: "success",
+        };
+        await appendAgentResults(traceId, execResult);
+        await finishAgentRecording(traceId, "completed");
+        return {
+          status: "completed",
+          actionPlan,
+          executionPlan,
+          execResult,
+        };
+      }
+
+      // Execute non-navigation steps via CDP
+      execResult = await executeAxPlanViaCDP(tabId, executionPlan, traceId);
+      await sendExecutionResult(apiBase, execResult);
+      await appendAgentResults(traceId, execResult);
+
+      const executionErrors = execResult?.errors || [];
+      if (executionErrors.length) {
+        console.warn("[VCAA-AX] Execution errors detected", { traceId, errors: executionErrors });
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        axTree = await collectAccessibilityTree(tabId, traceId);
+        continue;
+      }
+
+      // Success - break out of retry loop
+      break;
     }
 
-    // Success - break out of retry loop
-    break;
+    const endedReason = execResult?.errors?.length ? "failed" : "completed";
+    await finishAgentRecording(traceId, endedReason);
+    return { status: "completed", actionPlan, executionPlan, execResult, domMap: axTree };
+  } catch (err) {
+    if (traceId) {
+      await finishAgentRecording(traceId, "failed");
+    }
+    throw err;
   }
-
-  return { status: "completed", actionPlan, executionPlan, execResult, domMap: axTree };
 }
 
 async function runDemoFlow(
@@ -1302,7 +1859,7 @@ async function collectAccessibilityTree(tabId, traceId) {
 
   console.log(`[VCAA] Collected ${elements.length} interactive elements from AX tree (trace_id=${traceId})`);
 
-  return {
+  const payload = {
     schema_version: "axtree_v1",
     id: crypto.randomUUID(),
     trace_id: traceId,
@@ -1310,6 +1867,8 @@ async function collectAccessibilityTree(tabId, traceId) {
     generated_at: new Date().toISOString(),
     elements,
   };
+  await appendAgentAxSnapshot(traceId, payload, tabId);
+  return payload;
 }
 
 // Clean up debugger when tab is closed
@@ -1317,9 +1876,45 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (debuggerAttached.has(tabId)) {
     debuggerAttached.delete(tabId);
   }
+  if (humanRecordingState.active && humanRecordingState.enrolledTabs.has(tabId)) {
+    humanRecordingState.enrolledTabs.delete(tabId);
+    persistHumanActiveState();
+  }
   // Also clean up any pending plans for this tab
   clearPendingPlan(tabId);
   pendingNavigationTabs.delete(tabId);
+});
+
+chrome.tabs.onCreated.addListener((tab) => {
+  if (!AX_RECORDING_TEMP_FEATURES || !humanRecordingState.active) {
+    return;
+  }
+  if (tab?.id) {
+    enrollHumanTab(tab.id);
+  }
+});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  if (!AX_RECORDING_TEMP_FEATURES || !humanRecordingState.active) {
+    return;
+  }
+  if (activeInfo?.tabId) {
+    enrollHumanTab(activeInfo.tabId);
+  }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!AX_RECORDING_TEMP_FEATURES || !humanRecordingState.active) {
+    return;
+  }
+  if (changeInfo.status !== "complete") {
+    return;
+  }
+  if (!humanRecordingState.enrolledTabs.has(tabId)) {
+    return;
+  }
+  setHumanRecordingEnabled(tabId, true);
+  captureHumanSnapshotForTab(tabId);
 });
 
 // Handle debugger detach events
@@ -1460,12 +2055,18 @@ async function resumePendingPlanAfterNavigation(tabId) {
       if (executionPlan.schema_version === "clarification_v1") {
         console.log(`[VCAA] Navigator requested clarification after navigation`);
         // Can't easily surface clarification here, log and exit
+        await finishAgentRecording(traceId, "clarification");
         return;
       }
+
+      await appendAgentDecisions(traceId, executionPlan, axTree);
       
       // Execute the plan using CDP
       const execResult = await executeAxPlanViaCDP(tabId, executionPlan, traceId);
       await sendExecutionResult(apiBase, execResult);
+      await appendAgentResults(traceId, execResult);
+      const endedReason = execResult?.errors?.length ? "failed" : "completed";
+      await finishAgentRecording(traceId, endedReason);
       
       console.log(`[VCAA] Resumed AX plan execution complete for tab ${tabId}`);
     } else {
@@ -1535,6 +2136,107 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse(result);
       })
       .catch((err) => sendResponse({ status: "error", error: String(err) }));
+    return true;
+  }
+
+  if (message?.type === "vw-human-rec-start") {
+    (async () => {
+      if (!AX_RECORDING_TEMP_FEATURES) {
+        sendResponse({ status: "error", error: "AX recording features are disabled." });
+        return;
+      }
+      const promptText = (message.prompt_text || "").trim();
+      if (!promptText) {
+        sendResponse({ status: "error", error: "Example prompt is required." });
+        return;
+      }
+      if (humanRecordingState.active) {
+        sendResponse({
+          status: "ok",
+          active: true,
+          session_id: humanRecordingState.sessionId,
+          enrolled_tabs: Array.from(humanRecordingState.enrolledTabs),
+          started_at: humanRecordingState.startedAt,
+        });
+        return;
+      }
+      const sessionId = crypto.randomUUID();
+      humanRecordingState = {
+        active: true,
+        sessionId,
+        recording: buildRecordingBase({
+          mode: "human",
+          id: sessionId,
+          promptType: "human_example_prompt",
+          promptText,
+        }),
+        enrolledTabs: new Set(),
+        promptText,
+        startedAt: new Date().toISOString(),
+      };
+      await persistHumanRecording(humanRecordingState.recording);
+      await persistHumanActiveState();
+
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = tabs[0];
+      if (tab?.id) {
+        await enrollHumanTab(tab.id);
+        await captureHumanSnapshotForTab(tab.id);
+      }
+
+      sendResponse({
+        status: "ok",
+        active: true,
+        session_id: sessionId,
+        enrolled_tabs: Array.from(humanRecordingState.enrolledTabs),
+        started_at: humanRecordingState.startedAt,
+      });
+    })();
+    return true;
+  }
+
+  if (message?.type === "vw-human-rec-stop") {
+    (async () => {
+      if (!humanRecordingState.active) {
+        sendResponse({ status: "error", error: "No active human recording session." });
+        return;
+      }
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = tabs[0];
+      const result = await stopHumanRecording(tab?.id);
+      sendResponse(result);
+    })();
+    return true;
+  }
+
+  if (message?.type === "vw-human-rec-status") {
+    sendResponse({
+      status: "ok",
+      active: humanRecordingState.active,
+      session_id: humanRecordingState.sessionId,
+      enrolled_tabs: Array.from(humanRecordingState.enrolledTabs),
+      started_at: humanRecordingState.startedAt,
+    });
+    return true;
+  }
+
+  if (message?.type === "vw-axrec-human-event") {
+    (async () => {
+      if (!humanRecordingState.active) {
+        sendResponse({ status: "ignored" });
+        return;
+      }
+      const tabId = sender?.tab?.id;
+      if (!tabId) {
+        sendResponse({ status: "error", error: "Missing tab context." });
+        return;
+      }
+      await ensureDebuggerAttached(tabId);
+      const axTree = await captureHumanSnapshotForTab(tabId);
+      const target = await resolveHumanActionTarget(tabId, message.payload, axTree);
+      await appendHumanAction(message.payload, target, tabId);
+      sendResponse({ status: "ok" });
+    })();
     return true;
   }
 
@@ -1666,3 +2368,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return false;
 });
+
+if (AX_RECORDING_TEMP_FEATURES) {
+  loadHumanRecordingState();
+}

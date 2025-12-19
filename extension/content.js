@@ -201,6 +201,120 @@
     return { clicked: false, sawMatch };
   }
 
+  let humanRecordingEnabled = false;
+
+  const cssEscapeValue = (value) => {
+    if (window.CSS && typeof window.CSS.escape === "function") {
+      return window.CSS.escape(value);
+    }
+    return String(value).replace(/["\\]/g, "\\$&");
+  };
+
+  const buildCssSelector = (el) => {
+    if (!el || el.nodeType !== 1) return null;
+    if (el.id) {
+      return `#${cssEscapeValue(el.id)}`;
+    }
+    const segments = [];
+    let current = el;
+    for (let depth = 0; depth < 4 && current && current.nodeType === 1; depth += 1) {
+      const tag = current.tagName.toLowerCase();
+      if (!tag) {
+        break;
+      }
+      let segment = tag;
+      const nameAttr = current.getAttribute("name");
+      const ariaLabel = current.getAttribute("aria-label");
+      const role = current.getAttribute("role");
+      const typeAttr = current.getAttribute("type");
+      if (nameAttr) {
+        segment += `[name="${cssEscapeValue(nameAttr)}"]`;
+      } else if (ariaLabel) {
+        segment += `[aria-label="${cssEscapeValue(ariaLabel)}"]`;
+      } else if (role) {
+        segment += `[role="${cssEscapeValue(role)}"]`;
+      } else if (typeAttr && (tag === "input" || tag === "button")) {
+        segment += `[type="${cssEscapeValue(typeAttr)}"]`;
+      }
+      const parent = current.parentElement;
+      if (parent) {
+        const sameTagSiblings = Array.from(parent.children).filter(
+          (child) => child.tagName && child.tagName.toLowerCase() === tag
+        );
+        if (sameTagSiblings.length > 1) {
+          const index = sameTagSiblings.indexOf(current) + 1;
+          segment += `:nth-of-type(${index})`;
+        }
+      }
+      segments.unshift(segment);
+      if (current.id) {
+        break;
+      }
+      current = current.parentElement;
+    }
+    return segments.join(" > ");
+  };
+
+  const buildHumanTargetPayload = (el) => {
+    const rect = el.getBoundingClientRect();
+    const target = {
+      selector: buildCssSelector(el),
+      tag: (el.tagName || "").toLowerCase(),
+      role: el.getAttribute("role"),
+      name: el.getAttribute("name"),
+      aria_label: el.getAttribute("aria-label"),
+      placeholder: el.getAttribute("placeholder"),
+      text: (el.innerText || el.textContent || "").trim().slice(0, 120) || null,
+      bounding_rect: {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      },
+    };
+    return target;
+  };
+
+  const getHumanEventValue = (el, eventType) => {
+    if (eventType !== "change") {
+      return null;
+    }
+    const isSensitive = detectSensitiveField(el);
+    const rawValue = el.value;
+    return isSensitive ? null : rawValue ?? null;
+  };
+
+  const mapEventToActionType = (eventType) => {
+    if (eventType === "click") return "click";
+    if (eventType === "change") return "input";
+    if (eventType === "submit") return "submit";
+    return eventType;
+  };
+
+  const handleHumanRecordingEvent = (event) => {
+    if (!humanRecordingEnabled || !event?.isTrusted) {
+      return;
+    }
+    const target = event.target;
+    if (!target || target.nodeType !== 1) {
+      return;
+    }
+    const payload = {
+      event_id: crypto.randomUUID(),
+      event_type: event.type,
+      action_type: mapEventToActionType(event.type),
+      timestamp: new Date().toISOString(),
+      url: window.location.href,
+      value: getHumanEventValue(target, event.type),
+      target: buildHumanTargetPayload(target),
+    };
+    chrome.runtime.sendMessage({ type: "vw-axrec-human-event", payload });
+  };
+
+  ["click", "change", "submit"].forEach((type) => {
+    document.addEventListener(type, handleHumanRecordingEvent, true);
+  });
+
   function looksLikeDate(value) {
     if (!value) return false;
     return !isNaN(Date.parse(value));
@@ -773,6 +887,11 @@
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "collect-dommap") {
       sendResponse(captureDomMap());
+      return true;
+    }
+    if (message?.type === "vw-axrec-human-enable") {
+      humanRecordingEnabled = Boolean(message.enabled);
+      sendResponse({ status: "ok", enabled: humanRecordingEnabled });
       return true;
     }
     if (message?.type === "execute-plan") {

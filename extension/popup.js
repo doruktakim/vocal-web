@@ -13,6 +13,10 @@ const clarificationHistoryContainer = document.getElementById("clarificationHist
 const runButton = document.getElementById("run");
 const micToggle = document.getElementById("micToggle");
 const resetClarificationButton = document.getElementById("resetClarification");
+const humanRecPrompt = document.getElementById("humanRecPrompt");
+const humanRecStart = document.getElementById("humanRecStart");
+const humanRecStop = document.getElementById("humanRecStop");
+const humanRecStatus = document.getElementById("humanRecStatus");
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 let pendingClarification = null;
 let clarificationHistory = [];
@@ -431,6 +435,31 @@ function formatResponse(resp) {
   return JSON.stringify(resp, null, 2);
 }
 
+function updateHumanRecordingStatus(state) {
+  if (!humanRecStatus) {
+    return;
+  }
+  const active = Boolean(state?.active);
+  const tabCount = Array.isArray(state?.enrolled_tabs) ? state.enrolled_tabs.length : 0;
+  humanRecStatus.textContent = `Recording: ${active ? "ON" : "OFF"} | Tabs: ${tabCount}`;
+  if (humanRecStart) {
+    humanRecStart.disabled = active;
+  }
+  if (humanRecStop) {
+    humanRecStop.disabled = !active;
+  }
+}
+
+function refreshHumanRecordingStatus() {
+  chrome.runtime.sendMessage({ type: "vw-human-rec-status" }, (resp) => {
+    if (!resp || resp.status !== "ok") {
+      updateHumanRecordingStatus({ active: false, enrolled_tabs: [] });
+      return;
+    }
+    updateHumanRecordingStatus(resp);
+  });
+}
+
 function loadConfig() {
   chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps", "vcaaUseAccessibilityTree"], (result) => {
     if (result.vcaaApiBase) {
@@ -559,8 +588,38 @@ if (useAccessibilityTreeToggle) {
   useAccessibilityTreeToggle.addEventListener("change", handleUseAccessibilityTreeToggle);
 }
 
+if (humanRecStart) {
+  humanRecStart.addEventListener("click", () => {
+    const promptText = (humanRecPrompt?.value || "").trim();
+    if (!promptText) {
+      log("Please provide an example prompt before starting a recording.");
+      return;
+    }
+    chrome.runtime.sendMessage({ type: "vw-human-rec-start", prompt_text: promptText }, (resp) => {
+      if (!resp || resp.status !== "ok") {
+        log(resp?.error || "Failed to start human AX recording.");
+        return;
+      }
+      updateHumanRecordingStatus(resp);
+    });
+  });
+}
+
+if (humanRecStop) {
+  humanRecStop.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "vw-human-rec-stop" }, (resp) => {
+      if (!resp || resp.status !== "ok") {
+        log(resp?.error || "Failed to stop human AX recording.");
+        return;
+      }
+      refreshHumanRecordingStatus();
+    });
+  });
+}
+
 updateMicButtonLabel();
 loadConfig();
+refreshHumanRecordingStatus();
 
 if (resetClarificationButton) {
   resetClarificationButton.addEventListener("click", () => {
