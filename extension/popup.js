@@ -13,12 +13,19 @@ const clarificationHistoryContainer = document.getElementById("clarificationHist
 const runButton = document.getElementById("run");
 const micToggle = document.getElementById("micToggle");
 const resetClarificationButton = document.getElementById("resetClarification");
+const axrecSection = document.getElementById("axrecSection");
+const humanRecPrompt = document.getElementById("humanRecPrompt");
+const humanRecStart = document.getElementById("humanRecStart");
+const humanRecStop = document.getElementById("humanRecStop");
+const humanRecStatus = document.getElementById("humanRecStatus");
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
+const DEBUG_RECORDING_STORAGE_KEY = "DEBUG_RECORDING";
 let pendingClarification = null;
 let clarificationHistory = [];
 let awaitingClarificationResponse = false;
 let lastClarificationQuestion = "";
 let clarificationStack = [];
+let debugRecordingEnabled = false;
 
 const SpeechRecognition =
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -431,6 +438,46 @@ function formatResponse(resp) {
   return JSON.stringify(resp, null, 2);
 }
 
+function updateHumanRecordingStatus(state) {
+  if (!humanRecStatus) {
+    return;
+  }
+  const active = Boolean(state?.active);
+  const tabCount = Array.isArray(state?.enrolled_tabs) ? state.enrolled_tabs.length : 0;
+  humanRecStatus.textContent = `Recording: ${active ? "ON" : "OFF"} | Tabs: ${tabCount}`;
+  if (humanRecStart) {
+    humanRecStart.disabled = active || !debugRecordingEnabled;
+  }
+  if (humanRecStop) {
+    humanRecStop.disabled = !active || !debugRecordingEnabled;
+  }
+}
+
+function refreshHumanRecordingStatus() {
+  if (!debugRecordingEnabled) {
+    updateHumanRecordingStatus({ active: false, enrolled_tabs: [] });
+    return;
+  }
+  chrome.runtime.sendMessage({ type: "vw-human-rec-status" }, (resp) => {
+    if (!resp || resp.status !== "ok") {
+      updateHumanRecordingStatus({ active: false, enrolled_tabs: [] });
+      return;
+    }
+    updateHumanRecordingStatus(resp);
+  });
+}
+
+function refreshDebugRecordingFlag() {
+  chrome.storage.sync.get([DEBUG_RECORDING_STORAGE_KEY], (result) => {
+    const raw = result[DEBUG_RECORDING_STORAGE_KEY];
+    debugRecordingEnabled = String(raw || "").trim() === "1";
+    if (axrecSection) {
+      axrecSection.classList.toggle("enabled", debugRecordingEnabled);
+    }
+    refreshHumanRecordingStatus();
+  });
+}
+
 function loadConfig() {
   chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps", "vcaaUseAccessibilityTree"], (result) => {
     if (result.vcaaApiBase) {
@@ -559,8 +606,46 @@ if (useAccessibilityTreeToggle) {
   useAccessibilityTreeToggle.addEventListener("change", handleUseAccessibilityTreeToggle);
 }
 
+if (humanRecStart) {
+  humanRecStart.addEventListener("click", () => {
+    if (!debugRecordingEnabled) {
+      log("DEBUG_RECORDING is not enabled.");
+      return;
+    }
+    const promptText = (humanRecPrompt?.value || "").trim();
+    if (!promptText) {
+      log("Please provide an example prompt before starting a recording.");
+      return;
+    }
+    chrome.runtime.sendMessage({ type: "vw-human-rec-start", prompt_text: promptText }, (resp) => {
+      if (!resp || resp.status !== "ok") {
+        log(resp?.error || "Failed to start human AX recording.");
+        return;
+      }
+      updateHumanRecordingStatus(resp);
+    });
+  });
+}
+
+if (humanRecStop) {
+  humanRecStop.addEventListener("click", () => {
+    if (!debugRecordingEnabled) {
+      log("DEBUG_RECORDING is not enabled.");
+      return;
+    }
+    chrome.runtime.sendMessage({ type: "vw-human-rec-stop" }, (resp) => {
+      if (!resp || resp.status !== "ok") {
+        log(resp?.error || "Failed to stop human AX recording.");
+        return;
+      }
+      refreshHumanRecordingStatus();
+    });
+  });
+}
+
 updateMicButtonLabel();
 loadConfig();
+refreshDebugRecordingFlag();
 
 if (resetClarificationButton) {
   resetClarificationButton.addEventListener("click", () => {
@@ -571,3 +656,13 @@ if (resetClarificationButton) {
 }
 
 renderPopupClarificationHistory();
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "sync") {
+    return;
+  }
+  if (!Object.prototype.hasOwnProperty.call(changes, DEBUG_RECORDING_STORAGE_KEY)) {
+    return;
+  }
+  refreshDebugRecordingFlag();
+});

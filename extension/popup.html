@@ -64,6 +64,22 @@
       </div>
       <div id="clarificationPanel" role="status" aria-live="polite"></div>
       <div id="clarificationHistory" class="clarification-history"></div>
+      <section class="axrec-section" id="axrecSection">
+        <div class="axrec-title">Human AX Recording</div>
+        <label>
+          Example prompt
+          <input
+            id="humanRecPrompt"
+            type="text"
+            placeholder="Describe the example task"
+          />
+        </label>
+        <div class="axrec-controls">
+          <button id="humanRecStart" type="button">Start Recording</button>
+          <button id="humanRecStop" type="button">Stop Recording</button>
+        </div>
+        <div id="humanRecStatus" class="axrec-status">Recording: OFF | Tabs: 0</div>
+      </section>
       <pre id="output"></pre>
     </main>
     <script src="popup.js"></script>
