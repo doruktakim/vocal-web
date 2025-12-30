@@ -3,13 +3,24 @@
   "name": "VCAA Browser Observer",
   "version": "0.1.0",
   "description": "Voice-Controlled Assistive Agent browser observer and executor.",
-  "permissions": ["scripting", "activeTab", "storage", "debugger", "webNavigation", "downloads"],
+  "permissions": [
+    "scripting",
+    "activeTab",
+    "storage",
+    "debugger",
+    "webNavigation",
+    "downloads",
+    "sidePanel"
+  ],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_popup": "popup.html"
+    "default_title": "VCAA"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "content_scripts": [
     {
