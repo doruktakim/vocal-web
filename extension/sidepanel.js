@@ -3,21 +3,29 @@ const apiBaseField = document.getElementById("apiBase");
 const apiKeyField = document.getElementById("apiKey");
 const apiKeyStatus = document.getElementById("apiKeyStatus");
 const toggleApiKeyVisibility = document.getElementById("toggleApiKeyVisibility");
+const apiKeyToggleIcon = document.getElementById("apiKeyToggleIcon");
 const connectionSecurityStatus = document.getElementById("connectionSecurityStatus");
+const securityIcon = connectionSecurityStatus?.querySelector(".security-icon");
+const securityText = connectionSecurityStatus?.querySelector(".security-text");
 const requireHttpsToggle = document.getElementById("requireHttps");
 const useAccessibilityTreeToggle = document.getElementById("useAccessibilityTree");
 const axModeStatus = document.getElementById("axModeStatus");
 const outputEl = document.getElementById("output");
 const clarificationPanel = document.getElementById("clarificationPanel");
+const clarificationCard = document.getElementById("clarificationCard");
 const clarificationHistoryContainer = document.getElementById("clarificationHistory");
 const runButton = document.getElementById("run");
 const micToggle = document.getElementById("micToggle");
+const micToggleText = micToggle?.querySelector(".btn-text");
 const resetClarificationButton = document.getElementById("resetClarification");
 const axrecSection = document.getElementById("axrecSection");
 const humanRecPrompt = document.getElementById("humanRecPrompt");
 const humanRecStart = document.getElementById("humanRecStart");
 const humanRecStop = document.getElementById("humanRecStop");
 const humanRecStatus = document.getElementById("humanRecStatus");
+const settingsToggle = document.getElementById("settingsToggle");
+const settingsContent = document.getElementById("settingsContent");
+const settingsChevron = document.getElementById("settingsChevron");
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 const DEBUG_RECORDING_STORAGE_KEY = "DEBUG_RECORDING";
 let pendingClarification = null;
@@ -70,7 +78,9 @@ const toggleApiKeyMask = () => {
   }
   const showing = apiKeyField.type === "text";
   apiKeyField.type = showing ? "password" : "text";
-  toggleApiKeyVisibility.textContent = showing ? "Show" : "Hide";
+  if (apiKeyToggleIcon) {
+    apiKeyToggleIcon.textContent = showing ? "👁️" : "🙈";
+  }
   toggleApiKeyVisibility.setAttribute("aria-pressed", String(!showing));
 };
 
@@ -80,21 +90,26 @@ const updateConnectionSecurityIndicator = (state) => {
   }
   const secure = Boolean(state?.isSecure);
   const requireHttps = Boolean(state?.requireHttps);
+  let icon = "";
   let text = "";
   let tooltip = "";
   if (secure) {
-    text = "🔒 HTTPS connection";
+    icon = "🔒";
+    text = "HTTPS";
     tooltip = "Traffic between the extension and the API server is encrypted.";
   } else if (requireHttps) {
-    text = "⚠️ HTTPS required";
+    icon = "⚠️";
+    text = "HTTPS Required";
     tooltip =
       "HTTPS enforcement is enabled but the API base has not passed the HTTPS health check.";
   } else {
-    text = "⚠️ HTTP connection";
+    icon = "⚠️";
+    text = "HTTP";
     tooltip =
       "Traffic is currently sent over HTTP. Configure TLS on the API server and enable HTTPS.";
   }
-  connectionSecurityStatus.textContent = text;
+  if (securityIcon) securityIcon.textContent = icon;
+  if (securityText) securityText.textContent = text;
   connectionSecurityStatus.classList.toggle("secure", secure);
   connectionSecurityStatus.classList.toggle("insecure", !secure);
   connectionSecurityStatus.setAttribute("title", tooltip);
@@ -106,7 +121,8 @@ function refreshConnectionSecurityIndicator() {
   }
   chrome.runtime.sendMessage({ type: "vcaa-get-security-state" }, (resp) => {
     if (!resp || resp.status !== "ok") {
-      connectionSecurityStatus.textContent = "⚠️ Unknown security";
+      if (securityIcon) securityIcon.textContent = "⚠️";
+      if (securityText) securityText.textContent = "Unknown";
       connectionSecurityStatus.classList.remove("secure");
       connectionSecurityStatus.classList.add("insecure");
       connectionSecurityStatus.setAttribute(
@@ -124,17 +140,21 @@ function refreshConnectionSecurityIndicator() {
 
 function updateMicButtonLabel(text) {
   if (!SpeechRecognition) {
-    micToggle.textContent = "🎙️ Speech unavailable";
+    if (micToggleText) micToggleText.textContent = "Speech unavailable";
     micToggle.disabled = true;
     return;
   }
   if (text) {
-    micToggle.textContent = text;
+    if (micToggleText) micToggleText.textContent = text;
     return;
   }
-  micToggle.textContent = isListening
-    ? "🔴 Listening... click to stop"
-    : "🎙️ Start listening";
+  if (isListening) {
+    if (micToggleText) micToggleText.textContent = "Stop";
+    micToggle.classList.add("listening");
+  } else {
+    if (micToggleText) micToggleText.textContent = "Cancel";
+    micToggle.classList.remove("listening");
+  }
 }
 
 function ensureRecognition() {
@@ -301,6 +321,14 @@ const renderPopupClarificationHistory = () => {
     row.appendChild(answer);
     clarificationHistoryContainer.appendChild(row);
   });
+  // Show/hide clarification card based on history
+  if (clarificationCard) {
+    if (clarificationHistory.length > 0 || pendingClarification) {
+      clarificationCard.style.display = "block";
+    } else {
+      clarificationCard.style.display = "none";
+    }
+  }
 };
 
 const addPopupClarificationHistoryEntry = (question, answer) => {
@@ -355,10 +383,12 @@ const renderClarification = async (clarification) => {
   clarificationPanel.innerHTML = "";
   if (!clarification) {
     clarificationPanel.classList.remove("active");
+    if (clarificationCard) clarificationCard.classList.remove("active");
     awaitingClarificationResponse = false;
     return;
   }
   clarificationPanel.classList.add("active");
+  if (clarificationCard) clarificationCard.classList.add("active");
   const question = document.createElement("p");
   question.className = "clarification-question";
   question.textContent = clarification.question || "Clarification requested";
@@ -382,6 +412,7 @@ const clearClarificationPanel = () => {
   }
   clarificationPanel.innerHTML = "";
   clarificationPanel.classList.remove("active");
+  if (clarificationCard) clarificationCard.classList.remove("active");
   lastClarificationQuestion = "";
 };
 
@@ -479,7 +510,7 @@ function refreshDebugRecordingFlag() {
 }
 
 function loadConfig() {
-  chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps", "vcaaUseAccessibilityTree"], (result) => {
+  chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps"], (result) => {
     if (result.vcaaApiBase) {
       apiBaseField.value = result.vcaaApiBase;
     } else {
@@ -497,7 +528,8 @@ function loadConfig() {
       requireHttpsToggle.checked = Boolean(result.vcaaRequireHttps);
     }
     if (useAccessibilityTreeToggle) {
-      useAccessibilityTreeToggle.checked = Boolean(result.vcaaUseAccessibilityTree);
+      useAccessibilityTreeToggle.checked = true;
+      useAccessibilityTreeToggle.disabled = true;
     }
     refreshConnectionSecurityIndicator();
   });
@@ -526,14 +558,6 @@ function handleRequireHttpsToggle(event) {
   });
 }
 
-function handleUseAccessibilityTreeToggle(event) {
-  const enabled = Boolean(event?.target?.checked);
-  chrome.runtime.sendMessage({ type: "vcaa-set-ax-mode", enabled }, (resp) => {
-    if (resp?.status === "ok") {
-      console.log(`Accessibility tree mode ${enabled ? "enabled" : "disabled"}`);
-    }
-  });
-}
 
 function runDemo(transcriptInput, clarificationResponse = null) {
   const transcript = (transcriptInput || transcriptField.value).trim();
@@ -603,7 +627,8 @@ if (requireHttpsToggle) {
 }
 
 if (useAccessibilityTreeToggle) {
-  useAccessibilityTreeToggle.addEventListener("change", handleUseAccessibilityTreeToggle);
+  useAccessibilityTreeToggle.checked = true;
+  useAccessibilityTreeToggle.disabled = true;
 }
 
 if (humanRecStart) {
@@ -656,6 +681,14 @@ if (resetClarificationButton) {
 }
 
 renderPopupClarificationHistory();
+
+// Settings panel toggle
+if (settingsToggle && settingsContent && settingsChevron) {
+  settingsToggle.addEventListener("click", () => {
+    const isCollapsed = settingsContent.classList.toggle("collapsed");
+    settingsChevron.classList.toggle("collapsed", isCollapsed);
+  });
+}
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "sync") {

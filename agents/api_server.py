@@ -19,14 +19,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
 
 from agents.interpreter_agent import build_action_plan_from_transcript
-from agents.navigator_agent import build_ax_execution_plan, build_execution_plan
+from agents.navigator_agent import build_ax_execution_plan
 from agents.shared.asi_client import ASIClient
 from agents.shared.auth import verify_api_key
 from agents.shared.google_stt import TranscriptionError, transcribe_audio_base64
 from agents.shared.schemas import (
     AXNavigationRequest,
     ExecutionFeedback,
-    NavigationRequest,
     TranscriptMessage,
 )
 
@@ -134,12 +133,6 @@ async def transcribe_audio(payload: Dict[str, Any]):
 async def interpreter_endpoint(body: TranscriptMessage):
     plan = await build_action_plan_from_transcript(body, asi_client)
     return jsonable_encoder(plan)
-
-
-@app.post("/api/navigator/executionplan", dependencies=[Depends(verify_api_key)])
-async def navigator_endpoint(body: NavigationRequest):
-    result = await build_execution_plan(body)
-    return jsonable_encoder(result)
 
 
 @app.post("/api/navigator/ax-executionplan", dependencies=[Depends(verify_api_key)])

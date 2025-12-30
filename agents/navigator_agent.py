@@ -1,23 +1,17 @@
-"""Navigator agent: ActionPlan + DOMMap -> ExecutionPlan.
+"""Navigator agent: ActionPlan + AXTree -> AXExecutionPlan.
 
-This module supports two navigation modes:
-1. DOM-based (legacy): Uses DOMMap + optional LLM for element selection
-2. AX-tree-based (new): Uses Chrome Accessibility Tree for LLM-free navigation
-
-Set USE_ACCESSIBILITY_TREE=true to enable the new mode.
+This module uses the Chrome Accessibility Tree for LLM-free navigation.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import re
 from typing import Optional, Union
 
 from agents.shared.local_agents import Agent, Bureau, Context
 
 try:
-    from agents.shared.asi_client import ASIClient
     from agents.shared.schemas import (
         ActionPlan,
         AXElement,
@@ -26,22 +20,9 @@ try:
         AXNavigationRequest,
         AXTree,
         ClarificationRequest,
-        DOMMap,
-        ExecutionPlan,
         Intent,
-        NavigationRequest,
     )
     from agents.shared.utils_ids import make_uuid
-    from agents.shared.utils_plans import (
-        build_execution_plan_for_click_result,
-        build_execution_plan_for_destination_search,
-        build_execution_plan_for_flight_date_update,
-        build_execution_plan_for_flight_search,
-        build_execution_plan_for_history_back,
-        build_execution_plan_for_navigation,
-        build_execution_plan_for_scroll,
-        build_execution_plan_for_search_content,
-    )
     from agents.shared.ax_matcher import (
         build_intent_from_action_plan,
         find_action_button,
@@ -54,7 +35,6 @@ try:
     )
 except Exception:
     # Support running as a script (not as a package)
-    from shared.asi_client import ASIClient
     from shared.schemas import (
         ActionPlan,
         AXElement,
@@ -63,22 +43,9 @@ except Exception:
         AXNavigationRequest,
         AXTree,
         ClarificationRequest,
-        DOMMap,
-        ExecutionPlan,
         Intent,
-        NavigationRequest,
     )
     from shared.utils_ids import make_uuid
-    from shared.utils_plans import (
-        build_execution_plan_for_click_result,
-        build_execution_plan_for_destination_search,
-        build_execution_plan_for_flight_date_update,
-        build_execution_plan_for_flight_search,
-        build_execution_plan_for_history_back,
-        build_execution_plan_for_navigation,
-        build_execution_plan_for_scroll,
-        build_execution_plan_for_search_content,
-    )
     from shared.ax_matcher import (
         build_intent_from_action_plan,
         find_action_button,
@@ -93,20 +60,13 @@ except Exception:
 
 
 NAVIGATOR_SEED = os.getenv("NAVIGATOR_SEED", "navigator-seed")
-USE_ACCESSIBILITY_TREE = os.getenv("USE_ACCESSIBILITY_TREE", "false").lower() in ("true", "1", "yes")
 logger = logging.getLogger(__name__)
 
-asi_client = ASIClient()
 navigator_agent = Agent(
     name="navigator",
     seed=NAVIGATOR_SEED,
     endpoint=os.getenv("NAVIGATOR_ENDPOINT"),
 )
-
-
-# ============================================================================
-# Accessibility Tree-based Navigation (LLM-free)
-# ============================================================================
 
 
 async def build_ax_execution_plan(
@@ -453,130 +413,6 @@ def _build_search_content_steps(
         )
 
     return steps
-
-
-async def build_execution_plan(
-    nav_request: NavigationRequest,
-) -> Union[ExecutionPlan, ClarificationRequest]:
-    action = (nav_request.action_plan.action or "").lower()
-    entities = nav_request.action_plan.entities or {}
-    page_url = nav_request.dom_map.page_url or ""
-    has_dates = any(entities.get(k) for k in ["date", "date_start", "date_end"])
-
-    if action in {"update_flight_dates", "update_dates"}:
-        plan, clarification = build_execution_plan_for_flight_date_update(
-            nav_request.action_plan, nav_request.dom_map
-        )
-        if clarification:
-            return clarification
-        if plan:
-            logger.info("Navigator used URL date update path (trace_id=%s)", nav_request.trace_id)
-            return plan
-
-    is_flight_url = bool(re.search(r"/\d{6}/", page_url)) or ("skyscanner" in page_url)
-    if action in {"search_flights", "flight_search", "travel_flights"} and has_dates and is_flight_url:
-        updated = nav_request.action_plan.dict()
-        updated["action"] = "update_flight_dates"
-        updated["target"] = "flight_results_url"
-        updated["value"] = page_url or entities.get("url")
-        plan, clarification = build_execution_plan_for_flight_date_update(
-            ActionPlan(**updated), nav_request.dom_map
-        )
-        if clarification:
-            return clarification
-        if plan:
-            logger.info("Navigator rerouted flight search with dates to URL update (trace_id=%s)", nav_request.trace_id)
-            return plan
-
-    # Fast-path: avoid LLM calls for lightweight browser actions.
-    if action in {"scroll", "scroll_page", "history_back", "back", "go_back"}:
-        plan: Union[ExecutionPlan, None] = None
-        clarification: Union[ClarificationRequest, None] = None
-        if action in {"history_back", "back", "go_back"}:
-            plan, clarification = build_execution_plan_for_history_back(nav_request.action_plan)
-        else:
-            plan, clarification = build_execution_plan_for_scroll(nav_request.action_plan)
-        if clarification:
-            return clarification
-        if plan:
-            logger.info("Navigator used fast path for basic action %s (trace_id=%s)", action, nav_request.trace_id)
-            return plan
-
-    if asi_client.api_url and asi_client.api_key:
-        remote = await asi_client.navigate(
-            nav_request.action_plan.dict(), nav_request.dom_map.dict()
-        )
-        if remote:
-            logger.info("Navigator used LLM plan (trace_id=%s)", nav_request.trace_id)
-            if remote.get("schema_version") == "clarification_v1":
-                return ClarificationRequest(**remote)
-            if remote.get("schema_version") == "executionplan_v1":
-                return ExecutionPlan(**remote)
-        else:
-            logger.info("Navigator LLM unavailable/empty, falling back to heuristics (trace_id=%s)", nav_request.trace_id)
-    else:
-        logger.info("Navigator LLM not configured, using heuristics (trace_id=%s)", nav_request.trace_id)
-
-    if action in {"open_site", "navigate"}:
-        plan, clarification = build_execution_plan_for_navigation(nav_request.action_plan)
-    elif action in {"history_back", "back", "go_back"}:
-        plan, clarification = build_execution_plan_for_history_back(nav_request.action_plan)
-    elif action in {"scroll", "scroll_page"}:
-        plan, clarification = build_execution_plan_for_scroll(nav_request.action_plan)
-    elif action in {"search_content", "search", "search_site"}:
-        plan, clarification = build_execution_plan_for_search_content(
-            nav_request.action_plan, nav_request.dom_map
-        )
-    elif action in {"click_result", "click_item", "click"}:
-        plan, clarification = build_execution_plan_for_click_result(
-            nav_request.action_plan, nav_request.dom_map
-        )
-    elif action in {"search_hotels", "search_stays", "search_travel"}:
-        plan, clarification = build_execution_plan_for_destination_search(
-            nav_request.action_plan, nav_request.dom_map
-        )
-    elif action in {"update_flight_dates", "update_dates"}:
-        plan, clarification = build_execution_plan_for_flight_date_update(
-            nav_request.action_plan, nav_request.dom_map
-        )
-    elif action in {"search_flights", "flight_search", "travel_flights"}:
-        plan, clarification = build_execution_plan_for_flight_search(
-            nav_request.action_plan, nav_request.dom_map
-        )
-    else:
-        plan, clarification = (
-            None,
-            ClarificationRequest(
-                id=make_uuid(),
-                trace_id=nav_request.trace_id,
-                question="What should I do on this page?",
-                options=[],
-                reason="unsupported_action",
-            ),
-        )
-
-    if clarification:
-        return clarification
-    if plan:
-        return plan
-    return ClarificationRequest(
-        id=make_uuid(),
-        trace_id=nav_request.trace_id,
-        question="I could not find elements to act on.",
-        options=[],
-        reason="no_candidates",
-    )
-
-
-@navigator_agent.on_message(model=NavigationRequest)
-async def handle_navigation(ctx: Context, msg: NavigationRequest):
-    result = await build_execution_plan(msg)
-    await ctx.send(msg.sender, result)
-    ctx.logger.info(
-        "Navigator produced %s (trace_id=%s)",
-        result.schema_version if hasattr(result, "schema_version") else "unknown",
-        msg.trace_id,
-    )
 
 
 @navigator_agent.on_message(model=AXNavigationRequest)

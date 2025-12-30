@@ -1,4 +1,4 @@
-"""Orchestrator agent: route transcript + DOMMap through interpreter and navigator locally."""
+"""Orchestrator agent: route transcript + AXTree through interpreter and navigator locally."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ try:
     from agents.navigator_agent import navigator_agent
     from agents.shared.schemas import (
         ActionPlan,
+        AXExecutionPlan,
+        AXNavigationRequest,
         ClarificationRequest,
-        ExecutionPlan,
-        NavigationRequest,
         PipelineRequest,
         TranscriptMessage,
     )
@@ -26,9 +26,9 @@ except Exception:
     from navigator_agent import navigator_agent
     from shared.schemas import (
         ActionPlan,
+        AXExecutionPlan,
+        AXNavigationRequest,
         ClarificationRequest,
-        ExecutionPlan,
-        NavigationRequest,
         PipelineRequest,
         TranscriptMessage,
     )
@@ -69,7 +69,7 @@ async def handle_pipeline_request(ctx: Context, sender: str, msg: PipelineReques
     trace_id = msg.trace_id or make_uuid()
     _pipeline_sessions[trace_id] = {
         "sender": sender,
-        "dom_map": msg.dom_map,
+        "ax_tree": msg.ax_tree,
         "created_at": time.time(),
     }
     transcript_msg = TranscriptMessage(
@@ -94,8 +94,8 @@ async def handle_action_plan(ctx: Context, sender: str, plan: ActionPlan):
             "Orchestrator received ActionPlan for unknown trace_id=%s", trace_id
         )
         return
-    nav_request = NavigationRequest(
-        id=make_uuid(), trace_id=trace_id, action_plan=plan, dom_map=session["dom_map"]
+    nav_request = AXNavigationRequest(
+        id=make_uuid(), trace_id=trace_id, action_plan=plan, ax_tree=session["ax_tree"]
     )
     await ctx.send(navigator_agent.address, nav_request)
     ctx.logger.info(
@@ -103,19 +103,19 @@ async def handle_action_plan(ctx: Context, sender: str, plan: ActionPlan):
     )
 
 
-@orchestrator_agent.on_message(model=ExecutionPlan)
-async def handle_execution_plan(ctx: Context, sender: str, plan: ExecutionPlan):
+@orchestrator_agent.on_message(model=AXExecutionPlan)
+async def handle_execution_plan(ctx: Context, sender: str, plan: AXExecutionPlan):
     _prune_sessions()
     trace_id = plan.trace_id or ""
     session = _pipeline_sessions.pop(trace_id, None)
     if not session:
         ctx.logger.warning(
-            "Orchestrator received ExecutionPlan for unknown trace_id=%s", trace_id
+            "Orchestrator received AXExecutionPlan for unknown trace_id=%s", trace_id
         )
         return
     await ctx.send(session["sender"], plan)
     ctx.logger.info(
-        "Orchestrator returned ExecutionPlan to requester (trace_id=%s)", trace_id
+        "Orchestrator returned AXExecutionPlan to requester (trace_id=%s)", trace_id
     )
 
 

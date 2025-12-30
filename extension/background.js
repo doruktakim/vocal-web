@@ -194,7 +194,6 @@ const STORAGE_KEYS = {
   API_KEY: "vcaaApiKey",
   REQUIRE_HTTPS: "vcaaRequireHttps",
   PROTOCOL_PREFERENCE: "vcaaProtocolPreference",
-  USE_ACCESSIBILITY_TREE: "vcaaUseAccessibilityTree",
 };
 const HEALTH_TIMEOUT_MS = 2500;
 
@@ -796,15 +795,6 @@ const readSyncStorage = (keys) =>
     });
   });
 
-/**
- * Check if accessibility tree mode is enabled.
- * @returns {Promise<boolean>}
- */
-async function isAccessibilityTreeModeEnabled() {
-  const settings = await readSyncStorage([STORAGE_KEYS.USE_ACCESSIBILITY_TREE]);
-  return Boolean(settings[STORAGE_KEYS.USE_ACCESSIBILITY_TREE]);
-}
-
 const convertHttpToHttps = (base) => {
   try {
     const parsed = new URL(base);
@@ -1001,17 +991,6 @@ async function fetchActionPlan(
   return authorizedRequest(apiBase, "/api/interpreter/actionplan", body);
 }
 
-async function fetchExecutionPlan(apiBase, actionPlan, domMap, traceId) {
-  const body = {
-    schema_version: "navigator_v1",
-    id: crypto.randomUUID(),
-    trace_id: traceId,
-    action_plan: actionPlan,
-    dom_map: domMap,
-  };
-  return authorizedRequest(apiBase, "/api/navigator/executionplan", body);
-}
-
 /**
  * Fetch an execution plan using the accessibility tree (AX mode).
  * @param {string} apiBase - API base URL
@@ -1022,7 +1001,7 @@ async function fetchExecutionPlan(apiBase, actionPlan, domMap, traceId) {
  */
 async function fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId) {
   const body = {
-    schema_version: "ax_navigator_v1",
+    schema_version: "axnavigator_v1",
     id: crypto.randomUUID(),
     trace_id: traceId,
     action_plan: actionPlan,
@@ -1133,10 +1112,50 @@ async function sendExecutionResult(apiBase, result) {
   }
 }
 
-async function collectDomMap(tabId, traceId) {
-  const domMap = await sendMessageWithInjection(tabId, { type: "collect-dommap" });
-  domMap.trace_id = traceId;
-  return domMap;
+async function executeFastCommandViaCDP(tabId, action) {
+  const type = action?.type;
+  if (!type) {
+    return { status: "error", error: "Missing fast command type." };
+  }
+
+  switch (type) {
+    case "history_back":
+      await chrome.tabs.goBack(tabId);
+      return { status: "success", action_type: type };
+    case "history_forward":
+      await chrome.tabs.goForward(tabId);
+      return { status: "success", action_type: type };
+    case "reload":
+      await chrome.tabs.reload(tabId);
+      return { status: "success", action_type: type };
+    case "scroll": {
+      await attachDebugger(tabId);
+      const delta = action?.direction === "up" ? -700 : 700;
+      await sendCDPCommand(tabId, "Input.dispatchMouseEvent", {
+        type: "mouseWheel",
+        deltaX: 0,
+        deltaY: delta,
+      });
+      return { status: "success", action_type: type };
+    }
+    case "scroll_to": {
+      await attachDebugger(tabId);
+      const key = action?.position === "top" ? "Home" : "End";
+      await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key,
+        code: key,
+      });
+      await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key,
+        code: key,
+      });
+      return { status: "success", action_type: type };
+    }
+    default:
+      return { status: "error", error: `Unsupported fast command: ${type}` };
+  }
 }
 
 const HUMAN_CLARIFICATION_REASONS = new Set([
@@ -1156,258 +1175,6 @@ function shouldAskHumanClarification(clarification) {
   return HUMAN_CLARIFICATION_REASONS.has(clarification.reason);
 }
 
-async function performClarificationFallback(clarification, tabId, apiBase, traceId) {
-  const candidate = clarification.options?.find((option) => option.candidate_element_ids?.length);
-  if (!candidate) {
-    return false;
-  }
-  const elementId = candidate.candidate_element_ids[0];
-  const fallbackPlan = {
-    schema_version: "executionplan_v1",
-    id: crypto.randomUUID(),
-    trace_id: traceId,
-    steps: [
-      {
-        step_id: `s_fallback_${elementId}`,
-        action_type: "click",
-        element_id: elementId,
-        timeout_ms: 4000,
-        retries: 1,
-      },
-    ],
-  };
-  const result = await sendMessageWithInjection(tabId, {
-    type: "execute-plan",
-    plan: fallbackPlan,
-  });
-  await sendExecutionResult(apiBase, result);
-  return !!result;
-}
-
-async function validateExecution(
-  apiBase,
-  traceId,
-  actionPlan,
-  domMap,
-  executionPlan,
-  execResult
-) {
-  const validationActionPlan = {
-    ...actionPlan,
-    validation_context: {
-      previous_execution_plan: executionPlan?.steps || [],
-      execution_result: execResult || null,
-    },
-  };
-  const validationPlan = await fetchExecutionPlan(
-    apiBase,
-    validationActionPlan,
-    domMap,
-    traceId
-  );
-  if (validationPlan.schema_version === "clarification_v1") {
-    return { clarification: validationPlan };
-  }
-  return validationPlan;
-}
-
-async function runDemoFlowInternal(
-  transcript,
-  tabId,
-  clarificationResponse,
-  clarificationHistory = []
-) {
-  // FAST PATH: Check for simple commands first (only on fresh commands)
-  if (!clarificationResponse) {
-    const fastCommand = matchFastCommand(transcript);
-    if (fastCommand) {
-      console.log("[VCAA] Fast path: executing", fastCommand.type);
-      const result = await sendMessageWithInjection(tabId, {
-        type: "fast-command",
-        action: fastCommand
-      });
-      return {
-        status: "completed",
-        fastPath: true,
-        action: fastCommand,
-        execResult: result
-      };
-    }
-  }
-
-  // FULL PIPELINE: Continue with normal flow for complex commands
-  const { apiBase } = await resolveApiConfig();
-  const traceId = crypto.randomUUID();
-  let domMap = await collectDomMap(tabId, traceId);
-
-  const actionPlan = await fetchActionPlan(
-    apiBase,
-    transcript,
-    traceId,
-    domMap,
-    clarificationResponse,
-    clarificationHistory
-  );
-  if (actionPlan.schema_version === "clarification_v1") {
-    if (shouldAskHumanClarification(actionPlan)) {
-      return { status: "needs_clarification", actionPlan, domMap };
-    }
-    const fallbackApplied = await performClarificationFallback(
-      actionPlan,
-      tabId,
-      apiBase,
-      traceId
-    );
-    if (!fallbackApplied) {
-      return { status: "needs_clarification", actionPlan, domMap };
-    }
-    domMap = await collectDomMap(tabId, traceId);
-  }
-
-  async function ensureNavigationOnTarget() {
-    const desiredUrl = actionPlan?.entities?.url || actionPlan?.value;
-    if (!desiredUrl || !domMap?.page_url) {
-      return null;
-    }
-    const normalizedDomUrl = domMap.page_url.replace(/\/$/, "");
-    const normalizedDesired = desiredUrl.replace(/\/$/, "");
-    if (normalizedDomUrl.startsWith(normalizedDesired)) {
-      return null;
-    }
-
-    const navActionPlan = {
-      schema_version: "actionplan_v1",
-      id: crypto.randomUUID(),
-      trace_id: traceId,
-      action: "open_site",
-      target: actionPlan.entities?.site || actionPlan.target || normalizedDesired,
-      value: normalizedDesired,
-      entities: {
-        site: actionPlan.entities?.site,
-        url: normalizedDesired,
-      },
-      confidence: 0.75,
-    };
-
-    const navExecutionPlan = await fetchExecutionPlan(apiBase, navActionPlan, domMap, traceId);
-    if (navExecutionPlan.schema_version === "clarification_v1") {
-      return { clarification: navExecutionPlan };
-    }
-
-    const navExecResult = await sendMessageWithInjection(tabId, {
-      type: "execute-plan",
-      plan: navExecutionPlan,
-    });
-    await sendExecutionResult(apiBase, navExecResult);
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    const refreshedDomMap = await collectDomMap(tabId, traceId);
-    domMap = refreshedDomMap;
-    return { navigated: true };
-  }
-
-  const navigationOutcome = await ensureNavigationOnTarget();
-  if (navigationOutcome?.clarification) {
-    return { status: "needs_clarification", executionPlan: navigationOutcome.clarification, domMap };
-  }
-
-  let executionPlan = null;
-  let execResult = null;
-
-  // Allow a couple of planning/execution passes to handle "navigate then act on the new page".
-  for (let attempt = 0; attempt < 3; attempt++) {
-    executionPlan = await fetchExecutionPlan(apiBase, actionPlan, domMap, traceId);
-    if (executionPlan.schema_version === "clarification_v1") {
-      if (shouldAskHumanClarification(executionPlan)) {
-        return { status: "needs_clarification", executionPlan, domMap };
-      }
-      const fallbackApplied = await performClarificationFallback(
-        executionPlan,
-        tabId,
-        apiBase,
-        traceId
-      );
-      if (!fallbackApplied) {
-        return { status: "needs_clarification", executionPlan, domMap };
-      }
-      domMap = await collectDomMap(tabId, traceId);
-      continue;
-    }
-
-    execResult = await sendMessageWithInjection(tabId, {
-      type: "execute-plan",
-      plan: executionPlan,
-    });
-    await sendExecutionResult(apiBase, execResult);
-
-    const executionErrors = execResult?.errors || [];
-    if (executionErrors.length) {
-      console.warn("Execution errors detected", { traceId, errors: executionErrors });
-      // Allow a moment for the page to settle so the navigator sees updated DOM hints.
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      domMap = await collectDomMap(tabId, traceId);
-      continue;
-    }
-
-    const steps = executionPlan.steps || [];
-    const navOnly =
-      steps.length === 1 && (steps[0].action_type === "navigate" || steps[0].action_type === "open_site");
-    const navStepId = navOnly ? steps[0].step_id : null;
-    const navSucceeded = navOnly
-      ? (execResult.step_results || []).some((r) => r.step_id === navStepId && r.status === "success")
-      : false;
-
-    const isSearchAction = ["search_content", "search", "search_site"].includes(actionPlan.action);
-    const wantsResultClick =
-      isSearchAction &&
-      (actionPlan?.entities?.latest ||
-        actionPlan?.entities?.position ||
-        (actionPlan.target || "").toLowerCase().includes("video"));
-    const hasResultClickStep = steps.some((s) => s.step_id && s.step_id.includes("click_result"));
-    const searchExecuted = steps.some((s) => s.action_type === "input");
-
-    const needsFollowup =
-      (navOnly && navSucceeded && actionPlan.action !== "navigate" && actionPlan.action !== "open_site") ||
-      (wantsResultClick && searchExecuted && !hasResultClickStep);
-
-    if (needsFollowup) {
-      // Give the page time to finish loading/rendering results, then collect a fresh DOMMap and re-plan.
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      domMap = await collectDomMap(tabId, traceId);
-      continue;
-    }
-
-    // Either not a navigation/search-only plan, or no follow-up needed; stop here.
-    break;
-  }
-
-  const validationOutcome = await validateExecution(
-    apiBase,
-    traceId,
-    actionPlan,
-    domMap,
-    executionPlan,
-    execResult
-  );
-  if (validationOutcome?.clarification) {
-    return {
-      status: "needs_clarification",
-      executionPlan: validationOutcome.clarification,
-      domMap,
-    };
-  }
-  if (validationOutcome?.steps?.length) {
-    const validationExecResult = await sendMessageWithInjection(tabId, {
-      type: "execute-plan",
-      plan: validationOutcome,
-    });
-    await sendExecutionResult(apiBase, validationExecResult);
-    domMap = await collectDomMap(tabId, traceId);
-    executionPlan = validationOutcome;
-    execResult = validationExecResult;
-  }
-  return { status: "completed", actionPlan, executionPlan, execResult, domMap };
-}
-
 /**
  * AX-mode demo flow with proper navigation handling.
  * Uses accessibility tree and CDP for element interaction.
@@ -1425,10 +1192,7 @@ async function runDemoFlowInternalAX(
       const fastCommand = matchFastCommand(transcript);
       if (fastCommand) {
         console.log("[VCAA-AX] Fast path: executing", fastCommand.type);
-        const result = await sendMessageWithInjection(tabId, {
-          type: "fast-command",
-          action: fastCommand
-        });
+        const result = await executeFastCommandViaCDP(tabId, fastCommand);
         return {
           status: "completed",
           fastPath: true,
@@ -1461,10 +1225,10 @@ async function runDemoFlowInternalAX(
     if (actionPlan.schema_version === "clarification_v1") {
       await finishAgentRecording(traceId, "clarification");
       if (shouldAskHumanClarification(actionPlan)) {
-        return { status: "needs_clarification", actionPlan, domMap: axTree };
+        return { status: "needs_clarification", actionPlan, axTree };
       }
       // For AX mode, we can't easily do fallback clicks, return clarification
-      return { status: "needs_clarification", actionPlan, domMap: axTree };
+      return { status: "needs_clarification", actionPlan, axTree };
     }
 
     // Check if we need to navigate first
@@ -1483,7 +1247,6 @@ async function runDemoFlowInternalAX(
         actionPlan,
         transcript,
         apiBase,
-        useAccessibilityTree: true,
         savedAt: Date.now(),
       });
       pendingNavigationTabs.set(tabId, true);
@@ -1510,9 +1273,9 @@ async function runDemoFlowInternalAX(
       if (executionPlan.schema_version === "clarification_v1") {
         await finishAgentRecording(traceId, "clarification");
         if (shouldAskHumanClarification(executionPlan)) {
-          return { status: "needs_clarification", executionPlan, domMap: axTree };
+          return { status: "needs_clarification", executionPlan, axTree };
         }
-        return { status: "needs_clarification", executionPlan, domMap: axTree };
+        return { status: "needs_clarification", executionPlan, axTree };
       }
 
       await appendAgentDecisions(traceId, executionPlan, axTree);
@@ -1536,7 +1299,6 @@ async function runDemoFlowInternalAX(
             actionPlan,
             transcript,
             apiBase,
-            useAccessibilityTree: true,
             savedAt: Date.now(),
           });
           pendingNavigationTabs.set(tabId, true);
@@ -1588,7 +1350,7 @@ async function runDemoFlowInternalAX(
 
     const endedReason = execResult?.errors?.length ? "failed" : "completed";
     await finishAgentRecording(traceId, endedReason);
-    return { status: "completed", actionPlan, executionPlan, execResult, domMap: axTree };
+    return { status: "completed", actionPlan, executionPlan, execResult, axTree };
   } catch (err) {
     if (traceId) {
       await finishAgentRecording(traceId, "failed");
@@ -1604,15 +1366,7 @@ async function runDemoFlow(
   clarificationHistory = []
 ) {
   try {
-    // Check if AX mode is enabled
-    const useAXMode = await isAccessibilityTreeModeEnabled();
-    
-    if (useAXMode) {
-      console.log("[VCAA] Using Accessibility Tree mode");
-      return await runDemoFlowInternalAX(transcript, tabId, clarificationResponse, clarificationHistory);
-    }
-    
-    return await runDemoFlowInternal(transcript, tabId, clarificationResponse, clarificationHistory);
+    return await runDemoFlowInternalAX(transcript, tabId, clarificationResponse, clarificationHistory);
   } catch (err) {
     if (err instanceof AuthenticationError) {
       return { status: "error", error: err.message };
@@ -1912,40 +1666,31 @@ async function cdpExecuteStep(tabId, step) {
         // Special action for combobox fields that need autocomplete selection
         // 1. Type the value
         // 2. Wait for autocomplete suggestions
-        // 3. Click on matching suggestion via content script
+        // 3. Select the first suggestion via keyboard
         await cdpInputText(tabId, backend_node_id, value || "");
         await new Promise((resolve) => setTimeout(resolve, 500)); // Wait for autocomplete
-        // Use content script to find and click autocomplete option
-        try {
-          await sendMessageWithInjection(tabId, {
-            type: "vw-select-autocomplete",
-            value: value || "",
-          });
-        } catch (autoErr) {
-          console.warn("[VCAA] Autocomplete selection fallback:", autoErr.message);
-          // Fallback: press ArrowDown + Enter to select first option
-          await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
-            type: "keyDown",
-            key: "ArrowDown",
-            code: "ArrowDown",
-          });
-          await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
-            type: "keyUp",
-            key: "ArrowDown",
-            code: "ArrowDown",
-          });
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
-            type: "keyDown",
-            key: "Enter",
-            code: "Enter",
-          });
-          await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
-            type: "keyUp",
-            key: "Enter",
-            code: "Enter",
-          });
-        }
+        // Press ArrowDown + Enter to select first option
+        await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key: "ArrowDown",
+          code: "ArrowDown",
+        });
+        await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key: "ArrowDown",
+          code: "ArrowDown",
+        });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key: "Enter",
+          code: "Enter",
+        });
+        await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key: "Enter",
+          code: "Enter",
+        });
         await new Promise((resolve) => setTimeout(resolve, 300)); // Wait for selection to apply
         break;
       case "focus":
@@ -2146,7 +1891,7 @@ async function resumePendingPlanAfterNavigation(tabId) {
   console.log(`[VCAA] Resuming pending plan for tab ${tabId}, trace_id=${pendingData.traceId}`);
   
   try {
-    const { traceId, actionPlan, useAccessibilityTree, apiBase, transcript } = pendingData;
+    const { traceId, actionPlan, apiBase } = pendingData;
     
     // Clear the pending plan first to avoid re-execution loops
     await clearPendingPlan(tabId);
@@ -2155,58 +1900,32 @@ async function resumePendingPlanAfterNavigation(tabId) {
     // Wait a bit for the page to stabilize
     await new Promise((resolve) => setTimeout(resolve, 500));
     
-    // Ensure content script is injected
-    await injectContentScript(tabId);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Re-attach debugger if needed (may have detached during navigation)
+    await ensureDebuggerAttached(tabId);
 
-    if (useAccessibilityTree) {
-      // Re-attach debugger if needed (may have detached during navigation)
-      await ensureDebuggerAttached(tabId);
-      
-      // Collect fresh AX tree
-      const axTree = await collectAccessibilityTree(tabId, traceId);
-      
-      // Fetch new execution plan using the AX tree
-      const executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId);
-      
-      if (executionPlan.schema_version === "clarification_v1") {
-        console.log(`[VCAA] Navigator requested clarification after navigation`);
-        // Can't easily surface clarification here, log and exit
-        await finishAgentRecording(traceId, "clarification");
-        return;
-      }
+    // Collect fresh AX tree
+    const axTree = await collectAccessibilityTree(tabId, traceId);
 
-      await appendAgentDecisions(traceId, executionPlan, axTree);
-      
-      // Execute the plan using CDP
-      const execResult = await executeAxPlanViaCDP(tabId, executionPlan, traceId);
-      await sendExecutionResult(apiBase, execResult);
-      await appendAgentResults(traceId, execResult);
-      const endedReason = execResult?.errors?.length ? "failed" : "completed";
-      await finishAgentRecording(traceId, endedReason);
-      
-      console.log(`[VCAA] Resumed AX plan execution complete for tab ${tabId}`);
-    } else {
-      // DOM mode - collect fresh DOMMap
-      const domMap = await collectDomMap(tabId, traceId);
-      
-      // Fetch new execution plan
-      const executionPlan = await fetchExecutionPlan(apiBase, actionPlan, domMap, traceId);
-      
-      if (executionPlan.schema_version === "clarification_v1") {
-        console.log(`[VCAA] Navigator requested clarification after navigation`);
-        return;
-      }
-      
-      // Execute via content script
-      const execResult = await sendMessageWithInjection(tabId, {
-        type: "execute-plan",
-        plan: executionPlan,
-      });
-      await sendExecutionResult(apiBase, execResult);
-      
-      console.log(`[VCAA] Resumed DOM plan execution complete for tab ${tabId}`);
+    // Fetch new execution plan using the AX tree
+    const executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId);
+
+    if (executionPlan.schema_version === "clarification_v1") {
+      console.log(`[VCAA] Navigator requested clarification after navigation`);
+      // Can't easily surface clarification here, log and exit
+      await finishAgentRecording(traceId, "clarification");
+      return;
     }
+
+    await appendAgentDecisions(traceId, executionPlan, axTree);
+
+    // Execute the plan using CDP
+    const execResult = await executeAxPlanViaCDP(tabId, executionPlan, traceId);
+    await sendExecutionResult(apiBase, execResult);
+    await appendAgentResults(traceId, execResult);
+    const endedReason = execResult?.errors?.length ? "failed" : "completed";
+    await finishAgentRecording(traceId, endedReason);
+
+    console.log(`[VCAA] Resumed AX plan execution complete for tab ${tabId}`);
   } catch (err) {
     console.error(`[VCAA] Failed to resume pending plan for tab ${tabId}:`, err);
   }
@@ -2391,28 +2110,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "vcaa-dump-dommap") {
-    // Debug helper: capture the DOMMap of the active tab and return it.
-    chrome.tabs
-      .query({ active: true, currentWindow: true })
-      .then(async (tabs) => {
-        const tab = tabs[0];
-        if (!tab?.id) {
-          sendResponse({ status: "error", error: "No active tab" });
-          return;
-        }
-        try {
-          const traceId = crypto.randomUUID();
-          const domMap = await collectDomMap(tab.id, traceId);
-          sendResponse({ status: "ok", domMap });
-        } catch (err) {
-          sendResponse({ status: "error", error: String(err) });
-        }
-      })
-      .catch((err) => sendResponse({ status: "error", error: String(err) }));
-    return true;
-  }
-
   // Collect accessibility tree via CDP
   if (message?.type === "vcaa-collect-axtree") {
     chrome.tabs
@@ -2469,24 +2166,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         sendResponse({ status: "ok" });
       })
-      .catch((err) => sendResponse({ status: "error", error: String(err) }));
-    return true;
-  }
-
-  // Set accessibility tree mode
-  if (message?.type === "vcaa-set-ax-mode") {
-    const enabled = Boolean(message.enabled);
-    chrome.storage.sync.set({ [STORAGE_KEYS.USE_ACCESSIBILITY_TREE]: enabled }, () => {
-      console.log(`[VCAA] Accessibility tree mode ${enabled ? "enabled" : "disabled"}`);
-      sendResponse({ status: "ok", enabled });
-    });
-    return true;
-  }
-
-  // Get accessibility tree mode status
-  if (message?.type === "vcaa-get-ax-mode") {
-    isAccessibilityTreeModeEnabled()
-      .then((enabled) => sendResponse({ status: "ok", enabled }))
       .catch((err) => sendResponse({ status: "error", error: String(err) }));
     return true;
   }

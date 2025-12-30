@@ -7,79 +7,126 @@
   </head>
   <body>
     <main>
-      <h1>VCAA</h1>
-      <label>
-        Transcript
-        <textarea
-          id="transcript"
-          rows="3"
-          placeholder="Describe what you want to do"
-        ></textarea>
-      </label>
-      <label>
-        API Base
-        <input id="apiBase" type="text" placeholder="http://localhost:8081" />
-      </label>
-      <div class="connection-security-row">
-        <span
-          id="connectionSecurityStatus"
-          class="connection-security-indicator insecure"
-          role="status"
-          aria-live="polite"
-        >
-          ⚠️ HTTP connection
-        </span>
-        <label class="require-https-toggle">
-          <input id="requireHttps" type="checkbox" />
-          Require HTTPS connection
+      <header class="app-header">
+        <h1 class="app-title">VCAA</h1>
+      </header>
+
+      <section class="card">
+        <label class="input-group">
+          <span class="input-label">Goal</span>
+          <textarea
+            id="transcript"
+            rows="3"
+            placeholder="Show me cheap flights from Istanbul to NYC on January 25"
+          ></textarea>
         </label>
-      </div>
-      <div class="ax-mode-row">
-        <label class="ax-mode-toggle">
-          <input id="useAccessibilityTree" type="checkbox" />
-          Use Accessibility Tree (CDP mode)
-        </label>
-        <span id="axModeStatus" class="field-status status-info" title="Uses Chrome DevTools Protocol for element interaction">ℹ️</span>
-      </div>
-      <label>
-        API Key
-        <div class="api-key-input">
-          <input
-            id="apiKey"
-            type="password"
-            autocomplete="off"
-            placeholder="Paste generated API key"
-          />
-          <button id="toggleApiKeyVisibility" type="button" aria-pressed="false">
-            Show
+
+        <div class="button-group">
+          <button id="run" class="btn btn-primary">
+            <span class="btn-text">Start Task</span>
+          </button>
+          <button id="micToggle" type="button" class="btn btn-secondary" aria-live="polite">
+            <span class="btn-text">Cancel</span>
           </button>
         </div>
-        <span id="apiKeyStatus" class="field-status status-missing">API key not set</span>
-      </label>
-      <button id="micToggle" type="button" aria-live="polite">🎙️ Start listening</button>
-      <button id="run">Run Demo</button>
-      <div id="clarificationPanel" role="status" aria-live="polite"></div>
-      <div class="clarification-controls">
-        <button id="resetClarification" type="button">Reset clarifications</button>
-      </div>
-      <div id="clarificationHistory" class="clarification-history"></div>
-      <section class="axrec-section" id="axrecSection">
-        <div class="axrec-title">Human AX Recording</div>
-        <label>
-          Example prompt
+      </section>
+
+      <section class="card card-settings">
+        <div class="settings-header" id="settingsToggle">
+          <span class="settings-icon">⚙️</span>
+          <span>Settings</span>
+          <span class="chevron" id="settingsChevron">▼</span>
+        </div>
+
+        <div class="settings-content" id="settingsContent">
+          <label class="input-group">
+            <span class="input-label">API Base</span>
+            <input id="apiBase" type="text" placeholder="http://localhost:8081" />
+          </label>
+
+          <div class="security-row">
+            <span
+              id="connectionSecurityStatus"
+              class="security-badge insecure"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="security-icon">⚠️</span>
+              <span class="security-text">HTTP</span>
+            </span>
+            <label class="toggle-label">
+              <input id="requireHttps" type="checkbox" class="toggle-input" />
+              <span class="toggle-switch"></span>
+              <span class="toggle-text">Require HTTPS</span>
+            </label>
+          </div>
+
+          <div class="option-row">
+            <label class="toggle-label">
+              <input id="useAccessibilityTree" type="checkbox" class="toggle-input" />
+              <span class="toggle-switch"></span>
+              <span class="toggle-text">CDP Mode</span>
+            </label>
+            <span id="axModeStatus" class="info-badge" title="Uses Chrome DevTools Protocol for element interaction">?</span>
+          </div>
+
+          <label class="input-group">
+            <span class="input-label">API Key</span>
+            <div class="api-key-wrapper">
+              <input
+                id="apiKey"
+                type="password"
+                autocomplete="off"
+                placeholder="Enter your API key"
+              />
+              <button id="toggleApiKeyVisibility" type="button" class="btn-icon-only" aria-pressed="false">
+                <span id="apiKeyToggleIcon">👁️</span>
+              </button>
+            </div>
+            <span id="apiKeyStatus" class="status-text status-missing">Not configured</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="card" id="clarificationCard" style="display: none;">
+        <div class="section-header">
+          <span>💬</span>
+          <span>Clarification</span>
+        </div>
+        <div id="clarificationPanel" role="status" aria-live="polite"></div>
+        <div id="clarificationHistory" class="clarification-history"></div>
+        <button id="resetClarification" type="button" class="btn btn-ghost btn-sm">
+          Reset clarifications
+        </button>
+      </section>
+
+      <section class="card card-output">
+        <div class="section-header">
+          <span>📋</span>
+          <span>Output</span>
+        </div>
+        <pre id="output"></pre>
+      </section>
+
+      <section class="card axrec-section" id="axrecSection">
+        <div class="section-header">
+          <span>🔴</span>
+          <span>Human AX Recording</span>
+        </div>
+        <label class="input-group">
+          <span class="input-label">Example prompt</span>
           <input
             id="humanRecPrompt"
             type="text"
             placeholder="Describe the example task"
           />
         </label>
-        <div class="axrec-controls">
-          <button id="humanRecStart" type="button">Start Recording</button>
-          <button id="humanRecStop" type="button">Stop Recording</button>
+        <div class="button-group">
+          <button id="humanRecStart" type="button" class="btn btn-secondary btn-sm">Start Recording</button>
+          <button id="humanRecStop" type="button" class="btn btn-danger btn-sm">Stop Recording</button>
         </div>
-        <div id="humanRecStatus" class="axrec-status">Recording: OFF | Tabs: 0</div>
+        <div id="humanRecStatus" class="recording-status">Recording: OFF | Tabs: 0</div>
       </section>
-      <pre id="output"></pre>
     </main>
     <script src="sidepanel.js"></script>
   </body>

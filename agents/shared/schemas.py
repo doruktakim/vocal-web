@@ -28,50 +28,6 @@ class BoundingRect(Model):
     height: float = 0
 
 
-class DOMElement(Model):
-    element_id: str
-    tag: str
-    type: Optional[str] = None
-    text: Optional[str] = None
-    aria_label: Optional[str] = None
-    placeholder: Optional[str] = None
-    name: Optional[str] = None
-    value: Optional[str] = None
-    role: Optional[str] = None
-    attributes: Dict[str, Any] = None
-    css_selector: Optional[str] = None
-    xpath: Optional[str] = None
-    bounding_rect: Optional[BoundingRect] = None
-    visible: bool = True
-    enabled: bool = True
-    dataset: Dict[str, Any] = None
-    score_hint: float = 0.0
-    is_sensitive: bool = False
-    has_value: bool = False
-
-    @validator("attributes", pre=True, always=True)
-    def _default_attributes(cls, value):
-        return dict(value or {})
-
-    @validator("dataset", pre=True, always=True)
-    def _default_dataset(cls, value):
-        return dict(value or {})
-
-
-class DOMMap(Model):
-    schema_version: str = "dommap_v1"
-    id: Optional[str] = None
-    trace_id: Optional[str] = None
-    page_url: Optional[str] = None
-    generated_at: Optional[str] = None
-    elements: List[DOMElement]
-    diff: bool = False
-
-    @validator("generated_at", pre=True, always=True)
-    def _default_generated_at(cls, value):
-        return value or utc_now_iso()
-
-
 class ActionPlan(Model):
     schema_version: str = "actionplan_v1"
     id: str
@@ -112,24 +68,6 @@ class ClarificationRequest(Model):
     @validator("options", pre=True, always=True)
     def _default_options(cls, value):
         return list(value or [])
-
-
-class ExecutionStep(Model):
-    step_id: str
-    action_type: str
-    element_id: Optional[str] = None
-    value: Optional[str] = None
-    timeout_ms: int = 4000
-    retries: int = 0
-    confidence: float = 1.0
-    notes: Optional[str] = None
-
-
-class ExecutionPlan(Model):
-    schema_version: str = "executionplan_v1"
-    id: str
-    trace_id: Optional[str] = None
-    steps: List[ExecutionStep]
 
 
 class ExecutionResultStep(Model):
@@ -177,32 +115,6 @@ class TranscriptMessage(Model):
     @validator("metadata", pre=True, always=True)
     def _default_metadata(cls, value):
         return dict(value or {})
-
-
-class NavigationRequest(Model):
-    schema_version: str = "navigator_v1"
-    id: str
-    trace_id: Optional[str] = None
-    action_plan: ActionPlan
-    dom_map: DOMMap
-
-
-class PipelineRequest(Model):
-    schema_version: str = "pipeline_v1"
-    id: str
-    trace_id: Optional[str] = None
-    transcript: str
-    dom_map: DOMMap
-    metadata: Optional[Dict[str, Any]] = None
-
-    @validator("metadata", pre=True, always=True)
-    def _default_metadata(cls, value):
-        return dict(value or {})
-
-
-# ============================================================================
-# Accessibility Tree Schemas (CDP-based, LLM-free navigation)
-# ============================================================================
 
 
 class AXElement(Model):
@@ -281,3 +193,16 @@ class AXExecutionPlan(Model):
     id: str
     trace_id: Optional[str] = None
     steps: List[AXExecutionStep]
+
+
+class PipelineRequest(Model):
+    schema_version: str = "pipeline_v1"
+    id: str
+    trace_id: Optional[str] = None
+    transcript: str
+    ax_tree: AXTree
+    metadata: Optional[Dict[str, Any]] = None
+
+    @validator("metadata", pre=True, always=True)
+    def _default_metadata(cls, value):
+        return dict(value or {})

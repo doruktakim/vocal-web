@@ -8,8 +8,8 @@ This repo is currently under development. Thus, a web extension is currently imp
 
 ## Layout
 - `agents/` — interpreter and navigator agents, shared schemas, FastAPI bridge.
-- `extension/` — Chrome extension for DOMMap capture and plan execution.
-- `docs/prompts/` — interpreter and navigator prompt templates.
+- `extension/` — Chrome extension for accessibility-tree capture and CDP-based execution.
+- `docs/prompts/` — interpreter prompt templates.
 
 ## Quickstart
 1. Install Python deps: `pip install -r requirements.txt`.
@@ -70,4 +70,4 @@ This repo is currently under development. Thus, a web extension is currently imp
 
 ## Recently implemented
 - **Instant commands**: Extension-side shortcuts for basic actions (scroll up/down, back, forward, refresh, scroll to top/bottom) execute instantly (~50-100ms) without hitting the interpreter/navigator HTTP APIs.
-- **Improved DOMMap filtering to reduce tokens**: Better semantic matching, reduced max number of elements sent. 
+- **Accessibility-tree navigation (CDP)**: AX-tree capture and CDP execution enable LLM-free navigation without DOMMap payloads.

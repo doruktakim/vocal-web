@@ -28,7 +28,7 @@ def transcript_payload() -> dict:
 
 def navigation_payload() -> dict:
     return {
-        "schema_version": "navigator_v1",
+        "schema_version": "axnavigator_v1",
         "id": "nav-1",
         "trace_id": "trace-nav",
         "action_plan": {
@@ -39,19 +39,23 @@ def navigation_payload() -> dict:
             "confidence": 0.8,
             "entities": {},
         },
-        "dom_map": {
-            "schema_version": "dommap_v1",
-            "id": "dom-1",
+        "ax_tree": {
+            "schema_version": "axtree_v1",
+            "id": "ax-1",
             "trace_id": "trace-nav",
             "page_url": "https://example.com",
             "generated_at": "2024-01-01T00:00:00Z",
             "elements": [
                 {
-                    "element_id": "el_1",
-                    "tag": "div",
-                    "text": "Sample",
-                    "visible": True,
-                    "enabled": True,
+                    "ax_id": "ax_1",
+                    "backend_node_id": 1,
+                    "role": "generic",
+                    "name": "Sample",
+                    "description": "",
+                    "value": "",
+                    "focusable": False,
+                    "focused": False,
+                    "disabled": False,
                 }
             ],
         },
@@ -94,9 +98,9 @@ def test_interpreter_endpoint_requires_auth():
 
 def test_navigator_endpoint_requires_auth():
     payload = navigation_payload()
-    resp = client.post("/api/navigator/executionplan", json=payload, headers=auth_headers())
+    resp = client.post("/api/navigator/ax-executionplan", json=payload, headers=auth_headers())
     assert resp.status_code == 200
-    unauth = client.post("/api/navigator/executionplan", json=payload)
+    unauth = client.post("/api/navigator/ax-executionplan", json=payload)
     assert unauth.status_code == 401
 
 
