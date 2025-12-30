@@ -84,11 +84,6 @@ async def build_action_plan_from_transcript(
                             merged["url"] = url
                     if not plan.target and merged.get("site"):
                         plan.target = merged["site"]
-                has_date_remote = any(merged.get(k) for k in ["date", "date_start", "date_end"])
-                if flight_site_context and has_date_remote:
-                    plan.action = "update_flight_dates"
-                    plan.target = "flight_results_url"
-                    plan.value = page_url or merged.get("url")
                 plan.entities = merged or None
                 return plan
         else:
@@ -173,17 +168,6 @@ async def build_action_plan_from_transcript(
     has_destination_only = "destination" in entities
     has_date = any(k in entities for k in ["date", "date_start", "date_end"])
     hotel_intent = any(word in transcript_lower for word in ["hotel", "stay", "booking", "bookings.com"])
-
-    if has_date and flight_site_context:
-        return ActionPlan(
-            id=make_uuid(),
-            trace_id=msg.trace_id,
-            action="update_flight_dates",
-            target="flight_results_url",
-            value=page_url or entities.get("url"),
-            entities=entities,
-            confidence=0.86,
-        )
 
     if flight_intent:
         missing = []
