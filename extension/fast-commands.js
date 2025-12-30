@@ -23,6 +23,15 @@ const FAST_COMMAND_PATTERNS = [
     action: { type: "scroll", direction: "up" }
   },
 
+  // Generic scroll (defaults to down)
+  {
+    patterns: [
+      /^scroll$/i,
+      /^scroll\s+(please|now)?$/i,
+    ],
+    action: { type: "scroll", direction: "down" }
+  },
+
   // History back navigation
   {
     patterns: [

@@ -110,6 +110,14 @@ const FAST_COMMAND_PATTERNS = [
     ],
     action: { type: "scroll", direction: "up" }
   },
+  // Generic scroll (defaults to down)
+  {
+    patterns: [
+      /^scroll$/i,
+      /^scroll\s+(please|now)?$/i,
+    ],
+    action: { type: "scroll", direction: "down" }
+  },
   // History back navigation
   {
     patterns: [
@@ -1054,8 +1062,14 @@ async function executeAxPlanViaCDP(tabId, executionPlan, traceId) {
       continue;
     }
     
-    // For CDP-based actions, need backend_node_id
-    if (!step.backend_node_id) {
+    // For element-targeted actions, need backend_node_id.
+    const requiresBackendNodeId = ![
+      "scroll",
+      "history_back",
+      "history_forward",
+      "reload",
+    ].includes(step.action_type);
+    if (requiresBackendNodeId && !step.backend_node_id) {
       stepResults.push({
         step_id: step.step_id,
         status: "error",
@@ -1131,8 +1145,11 @@ async function executeFastCommandViaCDP(tabId, action) {
     case "scroll": {
       await attachDebugger(tabId);
       const delta = action?.direction === "up" ? -700 : 700;
+      const { x, y } = await getViewportCenterViaCDP(tabId);
       await sendCDPCommand(tabId, "Input.dispatchMouseEvent", {
         type: "mouseWheel",
+        x,
+        y,
         deltaX: 0,
         deltaY: delta,
       });
@@ -1440,6 +1457,28 @@ async function sendCDPCommand(tabId, method, params = {}) {
 }
 
 /**
+ * Get a safe viewport center point for CDP input events.
+ * CDP Input.dispatchMouseEvent requires x/y for wheel events.
+ * @param {number} tabId
+ * @returns {Promise<{x: number, y: number}>}
+ */
+async function getViewportCenterViaCDP(tabId) {
+  try {
+    const metrics = await sendCDPCommand(tabId, "Page.getLayoutMetrics", {});
+    const viewport = metrics?.layoutViewport;
+    const width = viewport?.clientWidth;
+    const height = viewport?.clientHeight;
+    if (typeof width === "number" && typeof height === "number" && width > 0 && height > 0) {
+      return { x: Math.floor(width / 2), y: Math.floor(height / 2) };
+    }
+  } catch (err) {
+    console.warn("[VCAA] Failed to get layout metrics for viewport center", err);
+  }
+  // Fallback to a small in-viewport coordinate.
+  return { x: 10, y: 10 };
+}
+
+/**
  * Get the full accessibility tree for a tab via CDP.
  * @param {number} tabId - The tab ID
  * @returns {Promise<Array>} Array of AXNodes
@@ -1661,6 +1700,28 @@ async function cdpExecuteStep(tabId, step) {
         break;
       case "input":
         await cdpInputText(tabId, backend_node_id, value || "");
+        break;
+      case "scroll": {
+        const direction = String(value || "down").toLowerCase();
+        const delta = direction === "up" ? -700 : 700;
+        const { x, y } = await getViewportCenterViaCDP(tabId);
+        await sendCDPCommand(tabId, "Input.dispatchMouseEvent", {
+          type: "mouseWheel",
+          x,
+          y,
+          deltaX: 0,
+          deltaY: delta,
+        });
+        break;
+      }
+      case "history_back":
+        await chrome.tabs.goBack(tabId);
+        break;
+      case "history_forward":
+        await chrome.tabs.goForward(tabId);
+        break;
+      case "reload":
+        await chrome.tabs.reload(tabId);
         break;
       case "input_select":
         // Special action for combobox fields that need autocomplete selection
