@@ -348,8 +348,90 @@ def find_input_field(
     return candidates[0][0]
 
 
+def find_date_button(
+    ax_tree: AXTree,
+    date_type: str = "start",
+    exclude_ax_ids: Optional[List[str]] = None
+) -> Optional[AXElement]:
+    """Find a date picker BUTTON (not the date cell inside calendar).
+    
+    This finds buttons like "Depart January 2026", "Check-in", "Check-out"
+    that need to be clicked to OPEN the date picker calendar.
+    
+    Args:
+        ax_tree: The accessibility tree to search
+        date_type: "start" for departure/check-in, "end" for return/check-out
+        exclude_ax_ids: List of ax_ids to skip
+    """
+    exclude_ax_ids = exclude_ax_ids or []
+    
+    # Patterns for date picker buttons
+    start_patterns = [
+        "depart", "departure", "check-in", "check in", "checkin",
+        "start date", "from date", "outbound", "leave"
+    ]
+    end_patterns = [
+        "return", "check-out", "check out", "checkout",
+        "end date", "to date", "inbound", "back"
+    ]
+    
+    # Negative patterns - these are NOT date buttons
+    negative_patterns = [
+        "traveler", "guest", "adult", "child", "room", "passenger",
+        "cabin", "class", "seat"
+    ]
+    
+    patterns = start_patterns if date_type == "start" else end_patterns
+    
+    candidates: List[Tuple[AXElement, float]] = []
+    
+    for el in ax_tree.elements:
+        if el.role != "button":
+            continue
+        if el.disabled:
+            continue
+        if el.ax_id in exclude_ax_ids:
+            continue
+            
+        name_lower = el.name.lower() if el.name else ""
+        
+        # Skip if matches negative patterns (travelers, guests, etc.)
+        if any(neg in name_lower for neg in negative_patterns):
+            continue
+        
+        score = 0.0
+        
+        # Check for date patterns
+        for pattern in patterns:
+            if pattern in name_lower:
+                score += 1.0
+                break
+        
+        # Also match buttons with month names (e.g., "January 2026")
+        month_names = [
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december"
+        ]
+        if any(month in name_lower for month in month_names):
+            # This is likely a date button showing current selection
+            score += 0.7
+        
+        if score > 0:
+            candidates.append((el, score))
+    
+    if not candidates:
+        return None
+    
+    candidates.sort(key=lambda x: -x[1])
+    return candidates[0][0]
+
+
 def find_date_cell(ax_tree: AXTree, target_date: str) -> Optional[AXElement]:
-    """Find a date cell in a calendar picker."""
+    """Find a date cell in a calendar picker (after calendar is opened).
+    
+    This finds the actual date cells (gridcells or buttons with day numbers)
+    inside an opened calendar popup.
+    """
     keywords = date_keywords(target_date)
 
     # First, look for gridcells (calendar cells)
@@ -365,7 +447,7 @@ def find_date_cell(ax_tree: AXTree, target_date: str) -> Optional[AXElement]:
         if any(kw in name_lower for kw in keywords):
             return el
 
-    # Fallback: look for buttons with date text
+    # Fallback: look for buttons with date text (verbose names like "Sunday, January 25, 2026")
     for el in ax_tree.elements:
         if el.role != "button":
             continue
@@ -373,10 +455,81 @@ def find_date_cell(ax_tree: AXTree, target_date: str) -> Optional[AXElement]:
             continue
 
         name_lower = el.name.lower() if el.name else ""
-        if any(kw in name_lower for kw in keywords):
+        # Look for longer matches (full date descriptions, not just day numbers)
+        if any(kw in name_lower for kw in keywords if len(kw) > 4):
             return el
 
     return None
+
+
+def find_autocomplete_option(
+    ax_tree: AXTree,
+    search_value: str,
+    exclude_ax_ids: Optional[List[str]] = None
+) -> Optional[AXElement]:
+    """Find an autocomplete suggestion matching the search value.
+    
+    After typing in a combobox (like Skyscanner's origin/destination fields),
+    autocomplete suggestions appear. This function finds the best matching
+    suggestion to click for confirmation.
+    
+    Args:
+        ax_tree: The accessibility tree to search
+        search_value: The value that was typed (e.g., "Paris", "Barcelona")
+        exclude_ax_ids: List of ax_ids to skip
+    """
+    exclude_ax_ids = exclude_ax_ids or []
+    search_lower = search_value.lower().strip()
+    
+    # Roles that typically represent autocomplete suggestions
+    suggestion_roles = ["option", "listitem", "menuitem", "listbox"]
+    
+    candidates: List[Tuple[AXElement, float]] = []
+    
+    for el in ax_tree.elements:
+        if el.ax_id in exclude_ax_ids:
+            continue
+        if el.disabled:
+            continue
+            
+        # Check role - prefer option/listitem
+        role_match = el.role in suggestion_roles
+        
+        name_lower = el.name.lower() if el.name else ""
+        
+        # Skip if name doesn't contain our search value
+        if search_lower not in name_lower:
+            continue
+        
+        score = 0.0
+        
+        # Score based on how well the name matches
+        if name_lower.startswith(search_lower):
+            score += 1.0  # Name starts with search value
+        elif search_lower in name_lower:
+            score += 0.7  # Name contains search value
+        
+        # Bonus for proper suggestion roles
+        if role_match:
+            score += 0.5
+        
+        # Bonus for focusable elements (interactive suggestions)
+        if el.focusable:
+            score += 0.2
+        
+        # Prefer shorter names (more specific matches)
+        if len(name_lower) < 50:
+            score += 0.1
+        
+        if score > 0:
+            candidates.append((el, score))
+    
+    if not candidates:
+        return None
+    
+    # Sort by score descending
+    candidates.sort(key=lambda x: -x[1])
+    return candidates[0][0]
 
 
 def find_action_button(

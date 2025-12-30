@@ -119,6 +119,69 @@ def find_input_field_test(
     return candidates[0][0]
 
 
+def find_date_button_test(
+    ax_tree: AXTree,
+    date_type: str = "start",
+    exclude_ax_ids: Optional[List[str]] = None
+) -> Optional[AXElement]:
+    """Find a date picker BUTTON - TEST VERSION."""
+    exclude_ax_ids = exclude_ax_ids or []
+    
+    start_patterns = [
+        "depart", "departure", "check-in", "check in", "checkin",
+        "start date", "from date", "outbound", "leave"
+    ]
+    end_patterns = [
+        "return", "check-out", "check out", "checkout",
+        "end date", "to date", "inbound", "back"
+    ]
+    
+    negative_patterns = [
+        "traveler", "guest", "adult", "child", "room", "passenger",
+        "cabin", "class", "seat"
+    ]
+    
+    patterns = start_patterns if date_type == "start" else end_patterns
+    
+    candidates: List[tuple] = []
+    
+    for el in ax_tree.elements:
+        if el.role != "button":
+            continue
+        if el.disabled:
+            continue
+        if el.ax_id in exclude_ax_ids:
+            continue
+            
+        name_lower = el.name.lower() if el.name else ""
+        
+        if any(neg in name_lower for neg in negative_patterns):
+            continue
+        
+        score = 0.0
+        
+        for pattern in patterns:
+            if pattern in name_lower:
+                score += 1.0
+                break
+        
+        month_names = [
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december"
+        ]
+        if any(month in name_lower for month in month_names):
+            score += 0.7
+        
+        if score > 0:
+            candidates.append((el, score))
+    
+    if not candidates:
+        return None
+    
+    candidates.sort(key=lambda x: -x[1])
+    return candidates[0][0]
+
+
 def find_action_button_test(
     ax_tree: AXTree, action_keywords: Optional[List[str]] = None
 ) -> Optional[AXElement]:
@@ -229,8 +292,10 @@ def test_flight_search():
     print("Testing Flight Search Element Matching")
     print("=" * 60)
     
-    # Load the agent recording (has the Skyscanner AX tree)
-    agent_path = Path(__file__).parent.parent / "docs/correctActions/agentFlightSearch.json"
+    # Load the improved agent recording (has the Skyscanner AX tree)
+    agent_path = Path(__file__).parent.parent / "docs/correctActions/improvedAlgorithm/agentFlight.json"
+    if not agent_path.exists():
+        agent_path = Path(__file__).parent.parent / "docs/correctActions/agentFlightSearch.json"
     recording = load_recording(str(agent_path))
     
     # Get the Skyscanner snapshot
@@ -278,8 +343,39 @@ def test_flight_search():
     else:
         print("✗ Could not find destination field")
     
-    # Test 3: Find search button
-    print("\n--- Test 3: Find Search Button ---")
+    # Test 3: Find Date Buttons
+    print("\n--- Test 3: Find Date Buttons ---")
+    print("Available buttons with date-related names:")
+    for el in ax_tree.elements:
+        if el.role == "button":
+            name_lower = (el.name or "").lower()
+            if any(kw in name_lower for kw in ["depart", "return", "check", "january", "february", "march"]):
+                print(f"  ax_id={el.ax_id}, name='{el.name}'")
+    
+    depart_btn = find_date_button_test(ax_tree, "start")
+    if depart_btn:
+        print(f"\n✓ Found departure date button: ax_id={depart_btn.ax_id}")
+        print(f"  Name: '{depart_btn.name}'")
+        if "depart" in (depart_btn.name or "").lower() or any(m in (depart_btn.name or "").lower() for m in ["january", "february"]):
+            print("  ✓ Correct: Found a departure/start date button")
+        else:
+            print("  ⚠ Warning: May not be correct date button")
+    else:
+        print("✗ Could not find departure date button")
+    
+    return_btn = find_date_button_test(ax_tree, "end", exclude_ax_ids=[depart_btn.ax_id] if depart_btn else [])
+    if return_btn:
+        print(f"\n✓ Found return date button: ax_id={return_btn.ax_id}")
+        print(f"  Name: '{return_btn.name}'")
+        if depart_btn and return_btn.ax_id == depart_btn.ax_id:
+            print("  ✗ ERROR: Return button is same as departure!")
+        elif "return" in (return_btn.name or "").lower():
+            print("  ✓ Correct: Found a return/end date button")
+    else:
+        print("  (No return button found - may be one-way search)")
+
+    # Test 4: Find search button
+    print("\n--- Test 4: Find Search Button ---")
     print("Available buttons/links with 'search' in name:")
     for el in ax_tree.elements:
         if el.role in ["button", "link"] and "search" in (el.name or "").lower():
@@ -289,7 +385,7 @@ def test_flight_search():
     if search_btn:
         print(f"\n✓ Selected search button: ax_id={search_btn.ax_id}, role={search_btn.role}")
         print(f"  Name: '{search_btn.name}'")
-        # Expected: Should be the actual "Search" button (ax_id 3017), not the promotional link
+        # Expected: Should be the actual "Search" button, not the promotional link
         if search_btn.role == "button" and len(search_btn.name or "") < 30:
             print("  ✓ Correct: Selected a short-named button (likely the main search)")
         elif "explore" in (search_btn.name or "").lower() or len(search_btn.name or "") > 50:
@@ -307,8 +403,10 @@ def test_hotel_search():
     print("Testing Hotel Search Element Matching")
     print("=" * 60)
     
-    # Load the agent recording (has the Booking.com AX tree)
-    agent_path = Path(__file__).parent.parent / "docs/correctActions/agentHotelSearch.json"
+    # Load the improved agent recording (has the Booking.com AX tree)
+    agent_path = Path(__file__).parent.parent / "docs/correctActions/improvedAlgorithm/agentHotel.json"
+    if not agent_path.exists():
+        agent_path = Path(__file__).parent.parent / "docs/correctActions/agentHotelSearch.json"
     recording = load_recording(str(agent_path))
     
     # Get the Booking.com snapshot
@@ -329,8 +427,40 @@ def test_hotel_search():
     else:
         print("✗ Could not find destination field")
     
-    # Test 2: Find search button
-    print("\n--- Test 2: Find Search Button ---")
+    # Test 2: Find Check-in/Check-out Date Buttons
+    print("\n--- Test 2: Find Date Buttons (Check-in/Check-out) ---")
+    print("Available buttons (looking for date-related):")
+    for el in ax_tree.elements:
+        if el.role == "button":
+            name_lower = (el.name or "").lower()
+            if any(kw in name_lower for kw in ["check", "date", "march", "april", "traveler", "room", "guest"]):
+                print(f"  ax_id={el.ax_id}, name='{el.name[:60]}'")
+    
+    checkin_btn = find_date_button_test(ax_tree, "start")
+    if checkin_btn:
+        print(f"\n✓ Found check-in date button: ax_id={checkin_btn.ax_id}")
+        print(f"  Name: '{checkin_btn.name}'")
+        # Should NOT be the travelers/rooms button
+        if "traveler" in (checkin_btn.name or "").lower() or "room" in (checkin_btn.name or "").lower():
+            print("  ✗ ERROR: Selected travelers/rooms button instead of date button!")
+            return False
+        else:
+            print("  ✓ Correct: Did not confuse with travelers/rooms button")
+    else:
+        print("  (No check-in button found with current patterns)")
+    
+    checkout_btn = find_date_button_test(ax_tree, "end", exclude_ax_ids=[checkin_btn.ax_id] if checkin_btn else [])
+    if checkout_btn:
+        print(f"\n✓ Found check-out date button: ax_id={checkout_btn.ax_id}")
+        print(f"  Name: '{checkout_btn.name}'")
+        if "traveler" in (checkout_btn.name or "").lower() or "room" in (checkout_btn.name or "").lower():
+            print("  ✗ ERROR: Selected travelers/rooms button instead of date button!")
+            return False
+    else:
+        print("  (No check-out button found with current patterns)")
+    
+    # Test 3: Find search button
+    print("\n--- Test 3: Find Search Button ---")
     print("Available buttons/links with 'search' in name:")
     for el in ax_tree.elements:
         if el.role in ["button", "link"] and "search" in (el.name or "").lower():
@@ -376,5 +506,6 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
 

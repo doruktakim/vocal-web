@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
 from agents.shared.schemas import DOMMap, DOMElement  # noqa: E402
-from agents.shared.utils import score_dom_element  # noqa: E402
+from agents.shared.utils_dom_scoring import score_dom_element  # noqa: E402
 
 
 @dataclass

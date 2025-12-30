@@ -901,6 +901,31 @@
       sendResponse(executeFastCommand(message.action));
       return true;
     }
+    if (message?.type === "vw-select-autocomplete") {
+      // Handle autocomplete selection for input_select action type
+      const value = message.value || "";
+      (async () => {
+        try {
+          const { clicked, sawMatch } = await pickOptionWithRetries(value, {
+            maxAttempts: 8,
+            maxMatchWaitMs: 3000,
+            initialDelay: 200,
+          });
+          if (!clicked && !sawMatch) {
+            // Fallback: press ArrowDown + Enter
+            const activeEl = document.activeElement;
+            if (activeEl) {
+              pressKeys(activeEl, ["ArrowDown", "Enter"]);
+            }
+          }
+          await sleep(200);
+          sendResponse({ status: "ok", clicked, sawMatch });
+        } catch (err) {
+          sendResponse({ status: "error", error: String(err) });
+        }
+      })();
+      return true; // Will respond asynchronously
+    }
     return false;
   });
 

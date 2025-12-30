@@ -14,7 +14,7 @@ import os
 import re
 from typing import Optional, Union
 
-from uagents import Agent, Bureau, Context
+from agents.shared.local_agents import Agent, Bureau, Context
 
 try:
     from agents.shared.asi_client import ASIClient
@@ -31,7 +31,8 @@ try:
         Intent,
         NavigationRequest,
     )
-    from agents.shared.utils import (
+    from agents.shared.utils_ids import make_uuid
+    from agents.shared.utils_plans import (
         build_execution_plan_for_click_result,
         build_execution_plan_for_destination_search,
         build_execution_plan_for_flight_date_update,
@@ -40,11 +41,12 @@ try:
         build_execution_plan_for_navigation,
         build_execution_plan_for_scroll,
         build_execution_plan_for_search_content,
-        make_uuid,
     )
     from agents.shared.ax_matcher import (
         build_intent_from_action_plan,
         find_action_button,
+        find_autocomplete_option,
+        find_date_button,
         find_date_cell,
         find_input_field,
         match_element_by_intent,
@@ -66,24 +68,28 @@ except Exception:
         Intent,
         NavigationRequest,
     )
-    from shared.utils import (
+    from shared.utils_ids import make_uuid
+    from shared.utils_plans import (
         build_execution_plan_for_click_result,
         build_execution_plan_for_destination_search,
+        build_execution_plan_for_flight_date_update,
         build_execution_plan_for_flight_search,
         build_execution_plan_for_history_back,
         build_execution_plan_for_navigation,
         build_execution_plan_for_scroll,
         build_execution_plan_for_search_content,
-        make_uuid,
     )
     from shared.ax_matcher import (
         build_intent_from_action_plan,
         find_action_button,
+        find_autocomplete_option,
+        find_date_button,
         find_date_cell,
         find_input_field,
         match_element_by_intent,
         pick_best_guess,
     )
+    from shared.local_agents import Agent, Bureau, Context
 
 
 NAVIGATOR_SEED = os.getenv("NAVIGATOR_SEED", "navigator-seed")
@@ -137,7 +143,7 @@ async def build_ax_execution_plan(
                     step_id=f"s_scroll_{make_uuid()[:8]}",
                     action_type="scroll",
                     backend_node_id=0,  # Not used for scroll
-                    value=entities.get("direction", "down"),
+                    value=entities.get("scroll_direction") or nav_request.action_plan.value or "down",
                     confidence=1.0,
                 )
             ],
@@ -284,31 +290,34 @@ def _build_search_form_steps(
     
     Uses field exclusion to prevent origin and destination from selecting
     the same combobox. Prioritizes description-based matching.
+    
+    For combobox fields (origin, destination), uses "input_select" action type
+    which signals the extension to:
+    1. Clear existing value and type the new value
+    2. Wait for autocomplete suggestions to appear
+    3. Click on the first matching suggestion to confirm selection
     """
     steps: list[AXExecutionStep] = []
     used_ax_ids: list[str] = []  # Track used fields to prevent duplicates
 
     # Step 1: Origin (if provided)
+    # Use input_select for comboboxes to handle autocomplete selection
     origin_field = None
     if intent.origin:
         origin_field = find_input_field(ax_tree, "origin", exclude_ax_ids=used_ax_ids)
         if origin_field:
             used_ax_ids.append(origin_field.ax_id)
+            # Use input_select for combobox to trigger autocomplete handling
+            action_type = "input_select" if origin_field.role == "combobox" else "input"
             steps.append(
                 AXExecutionStep(
                     step_id=f"s_origin_{make_uuid()[:8]}",
-                    action_type="input",
-                    target=AXExecutionStep.Target(
-                        selector_type="ax_node_id",
-                        ax_node_id=origin_field.ax_id,
-                        backend_node_id=origin_field.backend_node_id,
-                        role=origin_field.role,
-                        name=origin_field.name,
-                    ) if hasattr(AXExecutionStep, 'Target') else None,
+                    action_type=action_type,
                     backend_node_id=origin_field.backend_node_id,
                     value=intent.origin,
+                    timeout_ms=5000,  # Extra time for autocomplete
                     confidence=0.7,
-                    notes=f"Origin: {origin_field.name[:30] if origin_field.name else 'field'}",
+                    notes=f"Origin input+select: {origin_field.name[:30] if origin_field.name else 'field'}",
                 )
             )
 
@@ -317,54 +326,82 @@ def _build_search_form_steps(
         dest_field = find_input_field(ax_tree, "destination", exclude_ax_ids=used_ax_ids)
         if dest_field:
             used_ax_ids.append(dest_field.ax_id)
+            # Use input_select for combobox to trigger autocomplete handling
+            action_type = "input_select" if dest_field.role == "combobox" else "input"
             steps.append(
                 AXExecutionStep(
                     step_id=f"s_destination_{make_uuid()[:8]}",
-                    action_type="input",
-                    target=AXExecutionStep.Target(
-                        selector_type="ax_node_id",
-                        ax_node_id=dest_field.ax_id,
-                        backend_node_id=dest_field.backend_node_id,
-                        role=dest_field.role,
-                        name=dest_field.name,
-                    ) if hasattr(AXExecutionStep, 'Target') else None,
+                    action_type=action_type,
                     backend_node_id=dest_field.backend_node_id,
                     value=intent.location,
+                    timeout_ms=5000,  # Extra time for autocomplete
                     confidence=0.7,
-                    notes=f"Destination: {dest_field.name[:30] if dest_field.name else 'field'}",
+                    notes=f"Destination input+select: {dest_field.name[:30] if dest_field.name else 'field'}",
                 )
             )
 
-    # Step 3: Start date - look for date button to click
-    # Note: If date is already showing in a button (e.g., "Depart 1/25/26"),
-    # we might need to click it to open the calendar first
+    # Step 3: Start date handling
+    # Strategy: First check if calendar is already open (date cells visible).
+    # If not, click the date BUTTON to open the calendar.
+    # Note: After clicking the button, a new AX tree will be needed to select the date cell.
     if intent.date:
         # First try to find a date cell directly (if calendar is already open)
-        date_field = find_date_cell(ax_tree, intent.date)
-        if date_field:
+        date_cell = find_date_cell(ax_tree, intent.date)
+        if date_cell:
+            used_ax_ids.append(date_cell.ax_id)
             steps.append(
                 AXExecutionStep(
                     step_id=f"s_date_start_{make_uuid()[:8]}",
                     action_type="click",
-                    backend_node_id=date_field.backend_node_id,
-                    confidence=0.8,
-                    notes=f"Start date: {date_field.name[:30] if date_field.name else 'cell'}",
+                    backend_node_id=date_cell.backend_node_id,
+                    confidence=0.85,
+                    notes=f"Start date cell: {date_cell.name[:30] if date_cell.name else 'cell'}",
                 )
             )
+        else:
+            # Calendar not open - find and click the date BUTTON to open it
+            date_button = find_date_button(ax_tree, "start", exclude_ax_ids=used_ax_ids)
+            if date_button:
+                used_ax_ids.append(date_button.ax_id)
+                steps.append(
+                    AXExecutionStep(
+                        step_id=f"s_date_start_btn_{make_uuid()[:8]}",
+                        action_type="click",
+                        backend_node_id=date_button.backend_node_id,
+                        confidence=0.75,
+                        notes=f"Open date picker: {date_button.name[:30] if date_button.name else 'button'}",
+                    )
+                )
 
     # Step 4: End date (for return flights, checkout)
     if intent.date_end:
-        date_end_field = find_date_cell(ax_tree, intent.date_end)
-        if date_end_field:
+        # First try to find a date cell directly
+        date_end_cell = find_date_cell(ax_tree, intent.date_end)
+        if date_end_cell:
+            used_ax_ids.append(date_end_cell.ax_id)
             steps.append(
                 AXExecutionStep(
                     step_id=f"s_date_end_{make_uuid()[:8]}",
                     action_type="click",
-                    backend_node_id=date_end_field.backend_node_id,
-                    confidence=0.8,
-                    notes=f"End date: {date_end_field.name[:30] if date_end_field.name else 'cell'}",
+                    backend_node_id=date_end_cell.backend_node_id,
+                    confidence=0.85,
+                    notes=f"End date cell: {date_end_cell.name[:30] if date_end_cell.name else 'cell'}",
                 )
             )
+        else:
+            # Calendar not open - find and click the return/checkout date BUTTON
+            date_end_button = find_date_button(ax_tree, "end", exclude_ax_ids=used_ax_ids)
+            if date_end_button:
+                used_ax_ids.append(date_end_button.ax_id)
+                steps.append(
+                    AXExecutionStep(
+                        step_id=f"s_date_end_btn_{make_uuid()[:8]}",
+                        action_type="click",
+                        backend_node_id=date_end_button.backend_node_id,
+                        confidence=0.75,
+                        notes=f"Open return date picker: {date_end_button.name[:30] if date_end_button.name else 'button'}",
+                    )
+                )
 
     # Step 5: Search button - use improved scoring to find actual search button
     search_btn = find_action_button(ax_tree, ["search", "find", "go"])

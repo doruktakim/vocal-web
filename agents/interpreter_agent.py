@@ -1,12 +1,11 @@
 """Interpreter agent: transcript -> ActionPlan."""
-
 from __future__ import annotations
 import logging
 import os
 from typing import Union
 import re
 
-from uagents import Agent, Bureau, Context
+from agents.shared.local_agents import Agent, Bureau, Context
 
 try:
     from agents.shared.asi_client import ASIClient
@@ -16,7 +15,9 @@ try:
         ClarificationRequest,
         TranscriptMessage,
     )
-    from agents.shared.utils import extract_entities_from_transcript, make_uuid, map_site_to_url
+    from agents.shared.utils_entities import extract_entities_from_transcript
+    from agents.shared.utils_ids import make_uuid
+    from agents.shared.utils_urls import map_site_to_url
 except Exception:
     # Support running as a script (not as a package)
     from shared.asi_client import ASIClient
@@ -26,7 +27,10 @@ except Exception:
         ClarificationRequest,
         TranscriptMessage,
     )
-    from shared.utils import extract_entities_from_transcript, make_uuid, map_site_to_url
+    from shared.utils_entities import extract_entities_from_transcript
+    from shared.utils_ids import make_uuid
+    from shared.utils_urls import map_site_to_url
+    from shared.local_agents import Agent, Bureau, Context
 
 
 INTERPRETER_SEED = os.getenv("INTERPRETER_SEED", "interpreter-seed")

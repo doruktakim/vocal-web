@@ -1,3 +1,4 @@
+# macOS/Windows system files
 .DS_Store
 Thumbs.db
 
@@ -38,15 +39,7 @@ yarn.lock
 # Local environment secrets/logs
 .env
 *.env
-.DS_Store
 *.log
-
-# TLS/SSL certificates and keys (never commit these)
-*.pem
-*.key
-*.crt
-*.p12
-*.pfx
 extension/*.log
 dev/*.log
 
@@ -59,7 +52,3 @@ coverage/
 # Safari/Chrome
 LocalStorage/
 chrome_debug.log
-
-# Misc
-/dist/
-/build/

@@ -5,8 +5,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from uagents import Model
-from pydantic import validator
+try:
+    from pydantic.v1 import BaseModel, validator
+except Exception:  # pragma: no cover - fallback for pydantic v1
+    from pydantic import BaseModel, validator
+
+
+class Model(BaseModel):
+    class Config:
+        extra = "allow"
+        allow_mutation = True
 
 
 def utc_now_iso() -> str:

@@ -14,7 +14,8 @@ from typing import Any, Dict, List, Optional, Sequence
 import openai
 
 from .schemas import DOMElement
-from .utils import extract_intent_keywords, get_required_tags_for_action, score_dom_element
+from .utils_dom_scoring import score_dom_element
+from .utils_intent import extract_intent_keywords, get_required_tags_for_action
 
 
 class ASIClient:
@@ -22,6 +23,8 @@ class ASIClient:
         self.api_url = api_url or os.getenv("ASI_CLOUD_API_URL")
         self.api_key = api_key or os.getenv("ASI_CLOUD_API_KEY")
         self.model = model or os.getenv("ASI_CLOUD_MODEL", "openai/gpt-oss-20b")
+        self._client_instance: Optional[openai.OpenAI] = None
+        self._client_params: Optional[tuple[str, str]] = None
         self.dommap_filter_enabled = self._env_bool("DOMMAP_FILTER_ENABLED", True)
         self.dommap_min_elements = self._env_int("DOMMAP_MIN_ELEMENTS", 40)
         self.dommap_max_elements = self._env_int("DOMMAP_MAX_ELEMENTS", 120)
@@ -35,8 +38,14 @@ class ASIClient:
         if self.dommap_min_elements > self.dommap_max_elements:
             self.dommap_min_elements = self.dommap_max_elements
 
-    def _client(self) -> openai.OpenAI:
-        return openai.OpenAI(api_key=self.api_key, base_url=self.api_url)
+    def _client(self) -> Optional[openai.OpenAI]:
+        if not self.api_key or not self.api_url:
+            return None
+        params = (self.api_key, self.api_url)
+        if self._client_instance is None or self._client_params != params:
+            self._client_instance = openai.OpenAI(api_key=self.api_key, base_url=self.api_url)
+            self._client_params = params
+        return self._client_instance
 
     def _read_prompt(self, path: str) -> Optional[str]:
         try:
@@ -51,6 +60,8 @@ class ASIClient:
             return None
         try:
             client = self._client()
+            if client is None:
+                return None
             resp = client.chat.completions.create(
                 model=self.model,
                 messages=messages,

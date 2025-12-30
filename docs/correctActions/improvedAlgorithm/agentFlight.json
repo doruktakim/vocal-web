@@ -1,0 +1,936 @@
+{
+  "schema_version": "recording_v1",
+  "mode": "agent",
+  "id": "2e813bbd-4527-49ad-9d65-c02fee6eb284",
+  "created_at": "2025-12-19T16:22:14.842Z",
+  "ended_at": "2025-12-19T16:22:21.171Z",
+  "prompt": {
+    "type": "agent_transcript",
+    "text": "Show cheap flights from Paris to Barcelona on January 25",
+    "locale": "en-US"
+  },
+  "context": {
+    "extension_version": "0.1.0",
+    "ax_capture": {
+      "method": "Accessibility.getFullAXTree",
+      "notes": "CDP Accessibility.getFullAXTree depth=15"
+    }
+  },
+  "timeline": [
+    {
+      "t": "2025-12-19T16:22:14.852Z",
+      "kind": "ax_snapshot",
+      "url": "https://www.google.com/",
+      "tab_id": 1652421263,
+      "snapshot": {
+        "schema_version": "axtree_v1",
+        "id": "070f94e4-6984-4198-9132-c131012ec113",
+        "trace_id": "2e813bbd-4527-49ad-9d65-c02fee6eb284",
+        "page_url": "https://www.google.com/",
+        "generated_at": "2025-12-19T16:22:14.852Z",
+        "elements": [
+          {
+            "ax_id": "167",
+            "backend_node_id": 167,
+            "role": "link",
+            "name": "About",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "168",
+            "backend_node_id": 168,
+            "role": "link",
+            "name": "Store",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "514",
+            "backend_node_id": 514,
+            "role": "link",
+            "name": "Advertising",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "515",
+            "backend_node_id": 515,
+            "role": "link",
+            "name": "Business",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "516",
+            "backend_node_id": 516,
+            "role": "link",
+            "name": "How Search works",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "518",
+            "backend_node_id": 518,
+            "role": "link",
+            "name": "Privacy",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "519",
+            "backend_node_id": 519,
+            "role": "link",
+            "name": "Terms",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "525",
+            "backend_node_id": 525,
+            "role": "button",
+            "name": "Settings",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "185",
+            "backend_node_id": 185,
+            "role": "button",
+            "name": "Google Account: Teo (takim.doruk@gmail.com)",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "505",
+            "backend_node_id": 505,
+            "role": "link",
+            "name": "Deutsch",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "175",
+            "backend_node_id": 175,
+            "role": "link",
+            "name": "Gmail ",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "177",
+            "backend_node_id": 177,
+            "role": "link",
+            "name": "Search for Images ",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "180",
+            "backend_node_id": 180,
+            "role": "button",
+            "name": "Google apps",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "58",
+            "backend_node_id": 58,
+            "role": "combobox",
+            "name": "Search",
+            "description": "Search",
+            "value": "",
+            "focusable": true,
+            "focused": true,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "278",
+            "backend_node_id": 278,
+            "role": "button",
+            "name": "Search by voice",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "282",
+            "backend_node_id": 282,
+            "role": "button",
+            "name": "Search by image",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "285",
+            "backend_node_id": 285,
+            "role": "link",
+            "name": "AI Mode",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "456",
+            "backend_node_id": 456,
+            "role": "button",
+            "name": "Google Search",
+            "description": "Google Search",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "457",
+            "backend_node_id": 457,
+            "role": "button",
+            "name": "I'm Feeling Lucky",
+            "description": "I'm Feeling Lucky",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "224",
+            "backend_node_id": 224,
+            "role": "button",
+            "name": "Upload files or images",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          }
+        ]
+      }
+    },
+    {
+      "t": "2025-12-19T16:22:18.272Z",
+      "kind": "navigation",
+      "url": "https://www.skyscanner.net",
+      "tab_id": 1652421263,
+      "reason": "action_plan_navigation"
+    },
+    {
+      "t": "2025-12-19T16:22:20.406Z",
+      "kind": "ax_snapshot",
+      "url": "https://www.skyscanner.net/",
+      "tab_id": 1652421263,
+      "snapshot": {
+        "schema_version": "axtree_v1",
+        "id": "035b4b5f-12ef-4fa2-8b4f-c352707260a6",
+        "trace_id": "2e813bbd-4527-49ad-9d65-c02fee6eb284",
+        "page_url": "https://www.skyscanner.net/",
+        "generated_at": "2025-12-19T16:22:20.406Z",
+        "elements": [
+          {
+            "ax_id": "5005",
+            "backend_node_id": 5005,
+            "role": "link",
+            "name": "Hotels",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "5009",
+            "backend_node_id": 5009,
+            "role": "link",
+            "name": "Car rental",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "5013",
+            "backend_node_id": 5013,
+            "role": "link",
+            "name": "Explore everywhere",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "4928",
+            "backend_node_id": 4928,
+            "role": "link",
+            "name": "Can’t decide where to go?. Explore every destination. Search flights Everywhere",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3743",
+            "backend_node_id": 3743,
+            "role": "button",
+            "name": "Regional settings. Language English (United States). US Dollar. Select to change.",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3749",
+            "backend_node_id": 3749,
+            "role": "link",
+            "name": "Help",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3750",
+            "backend_node_id": 3750,
+            "role": "link",
+            "name": "Privacy Settings",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3751",
+            "backend_node_id": 3751,
+            "role": "link",
+            "name": "Log in",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3756",
+            "backend_node_id": 3756,
+            "role": "link",
+            "name": "Cookie policy",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3757",
+            "backend_node_id": 3757,
+            "role": "link",
+            "name": "Privacy policy",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3758",
+            "backend_node_id": 3758,
+            "role": "link",
+            "name": "Terms of service",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3759",
+            "backend_node_id": 3759,
+            "role": "link",
+            "name": "Company Details",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2907",
+            "backend_node_id": 2907,
+            "role": "link",
+            "name": "Skyscanner home",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2897",
+            "backend_node_id": 2897,
+            "role": "button",
+            "name": "Regional settings",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2905",
+            "backend_node_id": 2905,
+            "role": "link",
+            "name": "Saved flights, hotels, and cars",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2906",
+            "backend_node_id": 2906,
+            "role": "button",
+            "name": "Log in or sign up",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3013",
+            "backend_node_id": 3013,
+            "role": "button",
+            "name": "Search",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2893",
+            "backend_node_id": 2893,
+            "role": "link",
+            "name": "Help",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2916",
+            "backend_node_id": 2916,
+            "role": "tab",
+            "name": "Flights",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false,
+            "selected": true
+          },
+          {
+            "ax_id": "2922",
+            "backend_node_id": 2922,
+            "role": "tab",
+            "name": "Hotels",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false,
+            "selected": false
+          },
+          {
+            "ax_id": "2929",
+            "backend_node_id": 2929,
+            "role": "tab",
+            "name": "Car rental",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false,
+            "selected": false
+          },
+          {
+            "ax_id": "2938",
+            "backend_node_id": 2938,
+            "role": "button",
+            "name": "Select trip type, Roundtrip selected",
+            "description": "Select trip type",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2960",
+            "backend_node_id": 2960,
+            "role": "checkbox",
+            "name": "Direct flights",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false,
+            "checked": "false"
+          },
+          {
+            "ax_id": "2994",
+            "backend_node_id": 2994,
+            "role": "button",
+            "name": "Depart January 2026",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2998",
+            "backend_node_id": 2998,
+            "role": "button",
+            "name": "Return January 2026",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3045",
+            "backend_node_id": 3045,
+            "role": "button",
+            "name": "How does Skyscanner work?",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3059",
+            "backend_node_id": 3059,
+            "role": "button",
+            "name": "How can I find the cheapest flight using Skyscanner? ",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3083",
+            "backend_node_id": 3083,
+            "role": "button",
+            "name": "Where should I book a flight to right now?",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3098",
+            "backend_node_id": 3098,
+            "role": "button",
+            "name": "Do I book my flight with Skyscanner?",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3112",
+            "backend_node_id": 3112,
+            "role": "button",
+            "name": "What happens after I’ve booked my flight?",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3131",
+            "backend_node_id": 3131,
+            "role": "button",
+            "name": "Does Skyscanner do hotels too?",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3145",
+            "backend_node_id": 3145,
+            "role": "button",
+            "name": "What about car rentals?",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3159",
+            "backend_node_id": 3159,
+            "role": "button",
+            "name": "What’s a Price Alert? ",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3173",
+            "backend_node_id": 3173,
+            "role": "button",
+            "name": "Can I book a flexible flight ticket? ",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3187",
+            "backend_node_id": 3187,
+            "role": "button",
+            "name": "Can I book flights that emit less CO₂? ",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3210",
+            "backend_node_id": 3210,
+            "role": "button",
+            "name": "Our international sites",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3767",
+            "backend_node_id": 3767,
+            "role": "button",
+            "name": "Explore",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "4233",
+            "backend_node_id": 4233,
+            "role": "button",
+            "name": "Company",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "4279",
+            "backend_node_id": 4279,
+            "role": "button",
+            "name": "Partners",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "4313",
+            "backend_node_id": 4313,
+            "role": "button",
+            "name": "Trips",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "4414",
+            "backend_node_id": 4414,
+            "role": "button",
+            "name": "International Sites",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2945",
+            "backend_node_id": 2945,
+            "role": "combobox",
+            "name": "Paris (Any)",
+            "description": "Enter the city you're flying from, or choose from the options below",
+            "value": "Paris (Any)",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2955",
+            "backend_node_id": 2955,
+            "role": "checkbox",
+            "name": "Add nearby airports",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false,
+            "checked": "false"
+          },
+          {
+            "ax_id": "2968",
+            "backend_node_id": 2968,
+            "role": "button",
+            "name": "Swap origin and destination",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2973",
+            "backend_node_id": 2973,
+            "role": "combobox",
+            "name": "Country, city or airport",
+            "description": ". Enter your destination, or choose from the options below",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "expanded": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "2983",
+            "backend_node_id": 2983,
+            "role": "checkbox",
+            "name": "Add nearby airports",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false,
+            "checked": "false"
+          },
+          {
+            "ax_id": "3005",
+            "backend_node_id": 3005,
+            "role": "button",
+            "name": "Travelers and cabin class 1 Adult, Economy",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false
+          },
+          {
+            "ax_id": "3006",
+            "backend_node_id": 3006,
+            "role": "checkbox",
+            "name": "Add a hotel",
+            "description": "",
+            "value": "",
+            "focusable": true,
+            "focused": false,
+            "disabled": false,
+            "checked": "true"
+          }
+        ]
+      }
+    },
+    {
+      "t": "2025-12-19T16:22:20.421Z",
+      "kind": "decision",
+      "source": "agent",
+      "step": {
+        "step_id": "s_origin_fc00416c",
+        "action_type": "input",
+        "target": {
+          "selector_type": "ax_node_id",
+          "ax_node_id": "2945",
+          "backend_node_id": 2945,
+          "role": "combobox",
+          "name": "Paris (Any)"
+        },
+        "value": "Paris",
+        "timeout_ms": 4000,
+        "retries": 0
+      },
+      "confidence": 0.7,
+      "notes": "Origin: Paris (Any)"
+    },
+    {
+      "t": "2025-12-19T16:22:20.421Z",
+      "kind": "decision",
+      "source": "agent",
+      "step": {
+        "step_id": "s_destination_a2e38ecd",
+        "action_type": "input",
+        "target": {
+          "selector_type": "ax_node_id",
+          "ax_node_id": "2973",
+          "backend_node_id": 2973,
+          "role": "combobox",
+          "name": "Country, city or airport"
+        },
+        "value": "Barcelona",
+        "timeout_ms": 4000,
+        "retries": 0
+      },
+      "confidence": 0.7,
+      "notes": "Destination: Country, city or airport"
+    },
+    {
+      "t": "2025-12-19T16:22:20.421Z",
+      "kind": "decision",
+      "source": "agent",
+      "step": {
+        "step_id": "s_search_79b516f1",
+        "action_type": "click",
+        "target": {
+          "selector_type": "ax_node_id",
+          "ax_node_id": "3013",
+          "backend_node_id": 3013,
+          "role": "button",
+          "name": "Search"
+        },
+        "value": null,
+        "timeout_ms": 4000,
+        "retries": 0
+      },
+      "confidence": 0.9,
+      "notes": "Search: Search"
+    },
+    {
+      "t": "2025-12-19T16:22:21.166Z",
+      "kind": "action_result",
+      "source": "agent",
+      "step_id": "s_origin_fc00416c",
+      "status": "success",
+      "error": null,
+      "duration_ms": 65
+    },
+    {
+      "t": "2025-12-19T16:22:21.166Z",
+      "kind": "action_result",
+      "source": "agent",
+      "step_id": "s_destination_a2e38ecd",
+      "status": "success",
+      "error": null,
+      "duration_ms": 71
+    },
+    {
+      "t": "2025-12-19T16:22:21.166Z",
+      "kind": "action_result",
+      "source": "agent",
+      "step_id": "s_search_79b516f1",
+      "status": "success",
+      "error": null,
+      "duration_ms": 125
+    }
+  ],
+  "summary": {
+    "urls": [
+      "https://www.google.com/",
+      "https://www.skyscanner.net",
+      "https://www.skyscanner.net/"
+    ],
+    "action_count": 3,
+    "ax_snapshot_count": 2,
+    "ended_reason": "completed"
+  }
+}

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uagents import Bureau
+from agents.shared.local_agents import Bureau
 
 from agents.interpreter_agent import interpreter_agent
 from agents.orchestrator_agent import orchestrator_agent

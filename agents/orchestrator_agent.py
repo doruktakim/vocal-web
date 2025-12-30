@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Dict
 
-from uagents import Agent, Bureau, Context
+from agents.shared.local_agents import Agent, Bureau, Context
 
 try:
     from agents.interpreter_agent import interpreter_agent
@@ -19,7 +20,7 @@ try:
         PipelineRequest,
         TranscriptMessage,
     )
-    from agents.shared.utils import make_uuid
+    from agents.shared.utils_ids import make_uuid
 except Exception:
     from interpreter_agent import interpreter_agent
     from navigator_agent import navigator_agent
@@ -31,7 +32,8 @@ except Exception:
         PipelineRequest,
         TranscriptMessage,
     )
-    from shared.utils import make_uuid
+    from shared.utils_ids import make_uuid
+    from shared.local_agents import Agent, Bureau, Context
 
 
 ORCHESTRATOR_SEED = os.getenv("ORCHESTRATOR_SEED", "orchestrator-seed")
@@ -45,14 +47,30 @@ orchestrator_agent = Agent(
 
 # Track in-flight pipeline requests keyed by trace_id.
 _pipeline_sessions: Dict[str, Dict[str, object]] = {}
+_SESSION_TTL_SECONDS = int(os.getenv("ORCHESTRATOR_SESSION_TTL_SECONDS", "600"))
+
+
+def _prune_sessions(now: float | None = None) -> None:
+    if not _pipeline_sessions:
+        return
+    now = now if now is not None else time.time()
+    expired = [
+        trace_id
+        for trace_id, session in _pipeline_sessions.items()
+        if now - float(session.get("created_at", now)) > _SESSION_TTL_SECONDS
+    ]
+    for trace_id in expired:
+        _pipeline_sessions.pop(trace_id, None)
 
 
 @orchestrator_agent.on_message(model=PipelineRequest)
 async def handle_pipeline_request(ctx: Context, sender: str, msg: PipelineRequest):
+    _prune_sessions()
     trace_id = msg.trace_id or make_uuid()
     _pipeline_sessions[trace_id] = {
         "sender": sender,
         "dom_map": msg.dom_map,
+        "created_at": time.time(),
     }
     transcript_msg = TranscriptMessage(
         id=make_uuid(),
@@ -68,6 +86,7 @@ async def handle_pipeline_request(ctx: Context, sender: str, msg: PipelineReques
 
 @orchestrator_agent.on_message(model=ActionPlan)
 async def handle_action_plan(ctx: Context, sender: str, plan: ActionPlan):
+    _prune_sessions()
     trace_id = plan.trace_id or ""
     session = _pipeline_sessions.get(trace_id)
     if not session:
@@ -86,6 +105,7 @@ async def handle_action_plan(ctx: Context, sender: str, plan: ActionPlan):
 
 @orchestrator_agent.on_message(model=ExecutionPlan)
 async def handle_execution_plan(ctx: Context, sender: str, plan: ExecutionPlan):
+    _prune_sessions()
     trace_id = plan.trace_id or ""
     session = _pipeline_sessions.pop(trace_id, None)
     if not session:
@@ -103,6 +123,7 @@ async def handle_execution_plan(ctx: Context, sender: str, plan: ExecutionPlan):
 async def handle_clarification(
     ctx: Context, sender: str, msg: ClarificationRequest
 ):
+    _prune_sessions()
     trace_id = msg.trace_id or ""
     session = _pipeline_sessions.pop(trace_id, None)
     if not session:

@@ -1861,6 +1861,46 @@ async function cdpExecuteStep(tabId, step) {
       case "input":
         await cdpInputText(tabId, backend_node_id, value || "");
         break;
+      case "input_select":
+        // Special action for combobox fields that need autocomplete selection
+        // 1. Type the value
+        // 2. Wait for autocomplete suggestions
+        // 3. Click on matching suggestion via content script
+        await cdpInputText(tabId, backend_node_id, value || "");
+        await new Promise((resolve) => setTimeout(resolve, 500)); // Wait for autocomplete
+        // Use content script to find and click autocomplete option
+        try {
+          await sendMessageWithInjection(tabId, {
+            type: "vw-select-autocomplete",
+            value: value || "",
+          });
+        } catch (autoErr) {
+          console.warn("[VCAA] Autocomplete selection fallback:", autoErr.message);
+          // Fallback: press ArrowDown + Enter to select first option
+          await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+            type: "keyDown",
+            key: "ArrowDown",
+            code: "ArrowDown",
+          });
+          await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+            type: "keyUp",
+            key: "ArrowDown",
+            code: "ArrowDown",
+          });
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+            type: "keyDown",
+            key: "Enter",
+            code: "Enter",
+          });
+          await sendCDPCommand(tabId, "Input.dispatchKeyEvent", {
+            type: "keyUp",
+            key: "Enter",
+            code: "Enter",
+          });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300)); // Wait for selection to apply
+        break;
       case "focus":
         await cdpFocusElement(tabId, backend_node_id);
         break;
