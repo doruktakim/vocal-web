@@ -3,18 +3,18 @@
 // ============================================================================
 
 // Track debugger attachment state per tab to avoid duplicate attachments
-const debuggerAttached = new Map();
+const debuggerAttached = new Map<number, boolean>();
 
 /**
  * Attach Chrome debugger to a tab.
  * @param {number} tabId - The tab ID to attach to
  * @returns {Promise<void>}
  */
-async function attachDebugger(tabId) {
+async function attachDebugger(tabId: number): Promise<void> {
   if (debuggerAttached.get(tabId)) {
     return; // Already attached
   }
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     chrome.debugger.attach({ tabId }, "1.3", () => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
@@ -31,11 +31,11 @@ async function attachDebugger(tabId) {
  * @param {number} tabId - The tab ID to detach from
  * @returns {Promise<void>}
  */
-async function detachDebugger(tabId) {
+async function detachDebugger(tabId: number): Promise<void> {
   if (!debuggerAttached.get(tabId)) {
     return; // Not attached
   }
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     chrome.debugger.detach({ tabId }, () => {
       debuggerAttached.delete(tabId);
       resolve();
@@ -50,9 +50,13 @@ async function detachDebugger(tabId) {
  * @param {object} params - CDP method parameters
  * @returns {Promise<any>}
  */
-async function sendCDPCommand(tabId, method, params = {}) {
-  return new Promise((resolve, reject) => {
-    chrome.debugger.sendCommand({ tabId }, method, params, (result) => {
+async function sendCDPCommand(
+  tabId: number,
+  method: string,
+  params: Record<string, unknown> = {}
+): Promise<unknown> {
+  return new Promise<unknown>((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, method, params, (result: unknown) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
       } else {
@@ -68,9 +72,9 @@ async function sendCDPCommand(tabId, method, params = {}) {
  * @param {number} tabId
  * @returns {Promise<{x: number, y: number}>}
  */
-async function getViewportCenterViaCDP(tabId) {
+async function getViewportCenterViaCDP(tabId: number): Promise<{ x: number; y: number }> {
   try {
-    const metrics = await sendCDPCommand(tabId, "Page.getLayoutMetrics", {});
+    const metrics = (await sendCDPCommand(tabId, "Page.getLayoutMetrics", {})) as any;
     const viewport = metrics?.layoutViewport;
     const width = viewport?.clientWidth;
     const height = viewport?.clientHeight;
@@ -85,7 +89,7 @@ async function getViewportCenterViaCDP(tabId) {
 }
 
 // Handle debugger detach events
-chrome.debugger.onDetach.addListener((source, reason) => {
+chrome.debugger.onDetach.addListener((source: { tabId?: number }, reason: string) => {
   if (source.tabId) {
     debuggerAttached.delete(source.tabId);
     console.log(`[VCAA] Debugger detached from tab ${source.tabId}: ${reason}`);

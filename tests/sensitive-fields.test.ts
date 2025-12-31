@@ -1,10 +1,13 @@
-const assert = require("assert");
+import * as assert from "assert";
+import * as path from "path";
 
-const { isSensitiveField } = require("../../extension/lib/sensitive-fields.js");
+const { isSensitiveField } = require(
+  path.resolve(__dirname, "..", "..", "extension", "dist", "lib", "sensitive-fields.js")
+);
 
 let failures = 0;
 
-const test = (name, fn) => {
+const test = (name: string, fn: () => void) => {
   try {
     fn();
     console.log(`✓ ${name}`);
@@ -15,7 +18,18 @@ const test = (name, fn) => {
   }
 };
 
-const createElement = (overrides = {}) => {
+type ElementOverrides = {
+  tagName?: string;
+  type?: string;
+  name?: string;
+  id?: string;
+  placeholder?: string;
+  value?: string;
+  checked?: boolean;
+  attributes?: Record<string, string>;
+};
+
+const createElement = (overrides: ElementOverrides = {}) => {
   const attributes = { ...(overrides.attributes || {}) };
   return {
     tagName: overrides.tagName || "input",
@@ -25,7 +39,7 @@ const createElement = (overrides = {}) => {
     placeholder: overrides.placeholder || "",
     value: overrides.value || "",
     checked: overrides.checked || false,
-    getAttribute(attr) {
+    getAttribute(attr: string) {
       if (attr === "placeholder") {
         return this.placeholder;
       }
@@ -72,4 +86,3 @@ process.on("exit", () => {
   }
   console.log("All sensitive-field tests passed.");
 });
-

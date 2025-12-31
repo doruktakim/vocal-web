@@ -1,4 +1,4 @@
-function initSidePanelBehavior() {
+function initSidePanelBehavior(): void {
   if (!chrome.sidePanel?.setPanelBehavior) {
     return;
   }
@@ -9,7 +9,7 @@ function initSidePanelBehavior() {
   }
 }
 
-async function openSidePanelForWindow(windowId) {
+async function openSidePanelForWindow(windowId: number | undefined): Promise<void> {
   if (!chrome.sidePanel?.open || windowId == null) {
     return;
   }
@@ -20,7 +20,7 @@ async function openSidePanelForWindow(windowId) {
   }
 }
 
-async function openSidePanelForCurrentWindow() {
+async function openSidePanelForCurrentWindow(): Promise<void> {
   if (!chrome.windows?.getCurrent) {
     return;
   }

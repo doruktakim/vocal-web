@@ -1,11 +1,11 @@
-const stripTrailingSlash = (value) => {
+const stripTrailingSlash = (value: string): string => {
   if (!value) {
     return value;
   }
   return value.replace(/\/+$/, "");
 };
 
-const normalizeApiBaseInput = (value) => {
+const normalizeApiBaseInput = (value: string): string => {
   const trimmed = (value || "").trim();
   if (!trimmed) {
     return DEFAULT_API_BASE;
@@ -16,14 +16,14 @@ const normalizeApiBaseInput = (value) => {
   return trimmed;
 };
 
-const readSyncStorage = (keys) =>
-  new Promise((resolve) => {
-    chrome.storage.sync.get(keys, (items) => {
-      resolve(items || {});
+const readSyncStorage = (keys: string[]): Promise<Record<string, unknown>> =>
+  new Promise<Record<string, unknown>>((resolve) => {
+    chrome.storage.sync.get(keys, (items: Record<string, unknown>) => {
+      resolve((items || {}) as Record<string, unknown>);
     });
   });
 
-const convertHttpToHttps = (base) => {
+const convertHttpToHttps = (base: string): string => {
   try {
     const parsed = new URL(base);
     parsed.protocol = "https:";
@@ -33,7 +33,7 @@ const convertHttpToHttps = (base) => {
   }
 };
 
-const isHealthReachable = async (baseUrl) => {
+const isHealthReachable = async (baseUrl: string): Promise<boolean> => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
   const probeUrl = `${stripTrailingSlash(baseUrl)}/health`;
@@ -47,15 +47,19 @@ const isHealthReachable = async (baseUrl) => {
   }
 };
 
-async function resolveApiConfig() {
+async function resolveApiConfig(): Promise<{
+  apiBase: string;
+  isSecure: boolean;
+  requireHttps: boolean;
+}> {
   const settings = await readSyncStorage([
     STORAGE_KEYS.API_BASE,
     STORAGE_KEYS.PROTOCOL_PREFERENCE,
     STORAGE_KEYS.REQUIRE_HTTPS,
   ]);
-  let base = stripTrailingSlash(normalizeApiBaseInput(settings[STORAGE_KEYS.API_BASE]));
+  let base = stripTrailingSlash(normalizeApiBaseInput(String(settings[STORAGE_KEYS.API_BASE] || "")));
   const requireHttps = Boolean(settings[STORAGE_KEYS.REQUIRE_HTTPS]);
-  let preference = settings[STORAGE_KEYS.PROTOCOL_PREFERENCE];
+  let preference = settings[STORAGE_KEYS.PROTOCOL_PREFERENCE] as string | undefined;
 
   if (base.startsWith("https://")) {
     preference = "https";
@@ -89,14 +93,19 @@ async function resolveApiConfig() {
   return { apiBase: base, isSecure: base.startsWith("https://"), requireHttps };
 }
 
-async function getStoredSecurityState() {
+async function getStoredSecurityState(): Promise<{
+  apiBase: string;
+  isSecure: boolean;
+  requireHttps: boolean;
+  protocolPreference: string;
+}> {
   const settings = await readSyncStorage([
     STORAGE_KEYS.API_BASE,
     STORAGE_KEYS.PROTOCOL_PREFERENCE,
     STORAGE_KEYS.REQUIRE_HTTPS,
   ]);
-  const base = stripTrailingSlash(normalizeApiBaseInput(settings[STORAGE_KEYS.API_BASE]));
-  const preference = settings[STORAGE_KEYS.PROTOCOL_PREFERENCE];
+  const base = stripTrailingSlash(normalizeApiBaseInput(String(settings[STORAGE_KEYS.API_BASE] || "")));
+  const preference = settings[STORAGE_KEYS.PROTOCOL_PREFERENCE] as string | undefined;
   const isSecure = base.startsWith("https://") || preference === "https";
   return {
     apiBase: base,
@@ -107,23 +116,23 @@ async function getStoredSecurityState() {
 }
 
 class AuthenticationError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = "AuthenticationError";
   }
 }
 
-async function getApiKey() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get([STORAGE_KEYS.API_KEY], (result) =>
-      resolve(result[STORAGE_KEYS.API_KEY] || "")
+async function getApiKey(): Promise<string> {
+  return new Promise<string>((resolve) => {
+    chrome.storage.sync.get([STORAGE_KEYS.API_KEY], (result: Record<string, unknown>) =>
+      resolve(String(result[STORAGE_KEYS.API_KEY] || ""))
     );
   });
 }
 
-const isValidApiKey = (value) => API_KEY_PATTERN.test((value || "").trim());
+const isValidApiKey = (value: string): boolean => API_KEY_PATTERN.test((value || "").trim());
 
-async function getAuthHeaders() {
+async function getAuthHeaders(): Promise<Record<string, string>> {
   const key = (await getApiKey()).trim();
   if (!isValidApiKey(key)) {
     throw new AuthenticationError(
@@ -133,7 +142,12 @@ async function getAuthHeaders() {
   return { "X-API-Key": key };
 }
 
-async function authorizedRequest(apiBase, path, body, expectJson = true) {
+async function authorizedRequest<T = unknown>(
+  apiBase: string,
+  path: string,
+  body: unknown,
+  expectJson = true
+): Promise<T | null> {
   const headers = {
     "Content-Type": "application/json",
     ...(await getAuthHeaders()),
@@ -154,5 +168,5 @@ async function authorizedRequest(apiBase, path, body, expectJson = true) {
   if (!expectJson) {
     return null;
   }
-  return resp.json();
+  return (await resp.json()) as T;
 }

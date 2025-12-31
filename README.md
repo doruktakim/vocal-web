@@ -30,9 +30,14 @@ This repository implements the MVP of Vocal Web, an extension that enables users
    ```
 5. Run `mkcert -install && mkcert localhost 127.0.0.1 ::1` for locally trusted certificates, then point `SSL_KEYFILE`/`SSL_CERTFILE` at the generated files. See `docs/security/tls-setup.md` for more information.
 6. Start the HTTP API bridge: `python3 -m agents.api_server` (defaults to port `8081`).
-7. Load the `extension/` folder as an unpacked extension in Chrome.
-8. Open the extension popup (or `local-access.html`) and paste the authentication key into the **API Key** field.
-9. Test the extension by using it on an active webpage (e.g. https://www.google.com).
+7. Install JS tooling and build the extension bundle:
+   ```bash
+   npm install
+   npm run build:ext
+   ```
+8. Load the `extension/dist/` folder as an unpacked extension in Chrome.
+9. Open the extension popup (or `extension/dist/local-access.html`) and paste the authentication key into the **API Key** field.
+10. Test the extension by using it on an active webpage (e.g. https://www.google.com).
 
 
 ## Security

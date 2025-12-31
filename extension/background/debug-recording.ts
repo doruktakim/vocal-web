@@ -1,23 +1,97 @@
+type RecordingSummary = {
+  urls: string[];
+  action_count: number;
+  ax_snapshot_count: number;
+  ax_diff_count: number;
+  ended_reason: string | null;
+};
+
+type RecordingEntry = {
+  kind: string;
+  url?: string;
+  snapshot?: { page_url?: string };
+  diff?: { page_url?: string };
+  [key: string]: unknown;
+};
+
+type Recording = {
+  schema_version: string;
+  mode: string;
+  id: string;
+  created_at: string;
+  ended_at: string | null;
+  prompt: { type: string; text: string; locale: string };
+  context: { extension_version: string; ax_capture: { method: string; notes: string } };
+  timeline: RecordingEntry[];
+  summary: RecordingSummary;
+  [key: string]: unknown;
+};
+
+type AgentRecorder = { traceId: string; recording: Recording };
+type HumanRecordingState = {
+  active: boolean;
+  sessionId: string | null;
+  recording: Recording | null;
+  enrolledTabs: Set<number>;
+  promptText: string;
+  startedAt: string | null;
+};
+
+type AxSnapshot = {
+  page_url?: string;
+  elements?: Array<{
+    backend_node_id?: number;
+    ax_id?: string;
+    role?: string;
+    name?: string;
+  }>;
+};
+type AxMatch = { ax_id?: string; backend_node_id?: number; role?: string; name?: string };
+type AxDiffPayload = { page_url?: string; [key: string]: unknown };
+type TargetFallback = {
+  selector_type?: string;
+  ax_node_id?: string | null;
+  backend_node_id?: number | null;
+  role?: string | null;
+  name?: string | null;
+  css_selector?: string | null;
+};
+type HumanActionPayload = {
+  event_id?: string;
+  event_type?: string;
+  action_type?: string;
+  timestamp?: string;
+  url?: string;
+  value?: string | null;
+  target?: {
+    selector?: string;
+    bounding_rect?: { x: number; y: number; width: number; height: number };
+    role?: string;
+    name?: string;
+    aria_label?: string;
+  };
+};
+
 let debugRecordingEnabled = false;
-const agentRecorders = new Map();
-let humanRecordingState = {
+const agentRecorders = new Map<string, AgentRecorder>();
+let humanRecordingState: HumanRecordingState = {
   active: false,
   sessionId: null,
   recording: null,
-  enrolledTabs: new Set(),
+  enrolledTabs: new Set<number>(),
   promptText: "",
   startedAt: null,
 };
 
-const isDebugRecordingEnabled = () => debugRecordingEnabled;
+const isDebugRecordingEnabled = (): boolean => debugRecordingEnabled;
 
 // ============================================================================
 // Debug Recording Helpers
 // ============================================================================
 
-async function loadDebugRecordingFlag() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get([DEBUG_RECORDING_STORAGE_KEY], (result) => {
+async function loadDebugRecordingFlag(): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    chrome.storage.sync.get([DEBUG_RECORDING_STORAGE_KEY], (result: Record<string, unknown>) => {
       const raw = result[DEBUG_RECORDING_STORAGE_KEY];
       debugRecordingEnabled = String(raw || "").trim() === "1";
       resolve(debugRecordingEnabled);
@@ -25,7 +99,7 @@ async function loadDebugRecordingFlag() {
   });
 }
 
-async function setDebugRecordingEnabled(enabled) {
+async function setDebugRecordingEnabled(enabled: boolean): Promise<void> {
   debugRecordingEnabled = Boolean(enabled);
   if (!debugRecordingEnabled && humanRecordingState.active) {
     await stopHumanRecording();
@@ -35,7 +109,7 @@ async function setDebugRecordingEnabled(enabled) {
   }
 }
 
-const getRecordingLocale = () => {
+const getRecordingLocale = (): string => {
   try {
     return chrome.i18n.getUILanguage();
   } catch (err) {
@@ -43,8 +117,8 @@ const getRecordingLocale = () => {
   }
 };
 
-function formatRecordingTimestamp(date = new Date()) {
-  const pad = (value) => String(value).padStart(2, "0");
+function formatRecordingTimestamp(date: Date = new Date()): string {
+  const pad = (value: number): string => String(value).padStart(2, "0");
   const year = date.getFullYear();
   const month = pad(date.getMonth() + 1);
   const day = pad(date.getDate());
@@ -54,7 +128,17 @@ function formatRecordingTimestamp(date = new Date()) {
   return `${year}${month}${day}-${hours}${minutes}${seconds}`;
 }
 
-function buildRecordingBase({ mode, id, promptType, promptText }) {
+function buildRecordingBase({
+  mode,
+  id,
+  promptType,
+  promptText,
+}: {
+  mode: string;
+  id: string;
+  promptType: string;
+  promptText: string;
+}): Recording {
   const now = new Date().toISOString();
   return {
     schema_version: "recording_v1",
@@ -85,7 +169,7 @@ function buildRecordingBase({ mode, id, promptType, promptText }) {
   };
 }
 
-function addUrlToSummary(recording, url) {
+function addUrlToSummary(recording: Recording, url: string): void {
   if (!url) {
     return;
   }
@@ -96,7 +180,7 @@ function addUrlToSummary(recording, url) {
   recording.summary.urls = urls;
 }
 
-function appendTimelineEntry(recording, entry) {
+function appendTimelineEntry(recording: Recording, entry: RecordingEntry): void {
   if (!recording.timeline) {
     recording.timeline = [];
   }
@@ -121,18 +205,18 @@ function appendTimelineEntry(recording, entry) {
   }
 }
 
-async function persistRecording(key, recording) {
+async function persistRecording(key: string, recording: Recording): Promise<void> {
   await chrome.storage.session.set({ [key]: recording });
 }
 
-function buildDownloadFilename(mode, id) {
+function buildDownloadFilename(mode: string, id: string): string {
   const stamp = formatRecordingTimestamp(new Date());
   return mode === "agent"
     ? `vw-ax-agent-${id}-${stamp}.json`
     : `vw-ax-human-${id}-${stamp}.json`;
 }
 
-async function downloadRecording(recording, storageKey) {
+async function downloadRecording(recording: Recording, storageKey: string): Promise<boolean> {
   if (!isDebugRecordingEnabled()) {
     await chrome.storage.session.remove([storageKey]);
     return false;
@@ -140,8 +224,8 @@ async function downloadRecording(recording, storageKey) {
   const filename = buildDownloadFilename(recording.mode, recording.id);
   const payload = JSON.stringify(recording, null, 2);
   const url = `data:application/json;charset=utf-8,${encodeURIComponent(payload)}`;
-  return new Promise((resolve) => {
-    chrome.downloads.download({ url, filename, saveAs: false }, async (downloadId) => {
+  return new Promise<boolean>((resolve) => {
+    chrome.downloads.download({ url, filename, saveAs: false }, async (downloadId: number | undefined) => {
       if (chrome.runtime.lastError || !downloadId) {
         console.warn("[VCAA] Failed to download AX recording", chrome.runtime.lastError);
         resolve(false);
@@ -153,7 +237,7 @@ async function downloadRecording(recording, storageKey) {
   });
 }
 
-async function getAgentRecorder(traceId) {
+async function getAgentRecorder(traceId: string): Promise<AgentRecorder | null> {
   if (!isDebugRecordingEnabled() || !traceId) {
     return null;
   }
@@ -170,7 +254,7 @@ async function getAgentRecorder(traceId) {
   return null;
 }
 
-async function startAgentRecording(traceId, transcript) {
+async function startAgentRecording(traceId: string, transcript: string): Promise<AgentRecorder | null> {
   if (!isDebugRecordingEnabled() || !traceId) {
     return null;
   }
@@ -190,7 +274,10 @@ async function startAgentRecording(traceId, transcript) {
   return recorder;
 }
 
-function buildTargetFromAxMatch(axMatch, fallback = {}) {
+function buildTargetFromAxMatch(
+  axMatch: AxMatch | null,
+  fallback: TargetFallback = {}
+): Record<string, unknown> {
   if (axMatch) {
     return {
       selector_type: "ax_node_id",
@@ -210,14 +297,18 @@ function buildTargetFromAxMatch(axMatch, fallback = {}) {
   };
 }
 
-function resolveAxMatch(axTree, backendNodeId) {
+function resolveAxMatch(axTree: AxSnapshot | null, backendNodeId: number): AxMatch | null {
   if (!axTree?.elements || !backendNodeId) {
     return null;
   }
   return axTree.elements.find((el) => el.backend_node_id === backendNodeId) || null;
 }
 
-async function appendAgentAxSnapshot(traceId, axTree, tabId) {
+async function appendAgentAxSnapshot(
+  traceId: string,
+  axTree: AxSnapshot,
+  tabId: number
+): Promise<void> {
   const recorder = await getAgentRecorder(traceId);
   if (!recorder) {
     return;
@@ -235,7 +326,12 @@ async function appendAgentAxSnapshot(traceId, axTree, tabId) {
 
 globalThis.appendAgentAxSnapshot = appendAgentAxSnapshot;
 
-async function appendAgentAxDiff(traceId, axDiff, tabId, stepId) {
+async function appendAgentAxDiff(
+  traceId: string,
+  axDiff: AxDiffPayload,
+  tabId: number,
+  stepId?: string
+): Promise<void> {
   const recorder = await getAgentRecorder(traceId);
   if (!recorder || !axDiff) {
     return;
@@ -254,7 +350,11 @@ async function appendAgentAxDiff(traceId, axDiff, tabId, stepId) {
 
 globalThis.appendAgentAxDiff = appendAgentAxDiff;
 
-async function appendAgentDecisions(traceId, executionPlan, axTree) {
+async function appendAgentDecisions(
+  traceId: string,
+  executionPlan: ExecutionPlan,
+  axTree: AxSnapshot
+): Promise<void> {
   const recorder = await getAgentRecorder(traceId);
   if (!recorder || !executionPlan?.steps?.length) {
     return;
@@ -286,7 +386,7 @@ async function appendAgentDecisions(traceId, executionPlan, axTree) {
   await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
 }
 
-async function appendAgentResults(traceId, execResult) {
+async function appendAgentResults(traceId: string, execResult: ExecutionResult): Promise<void> {
   const recorder = await getAgentRecorder(traceId);
   if (!recorder || !execResult?.step_results?.length) {
     return;
@@ -306,7 +406,12 @@ async function appendAgentResults(traceId, execResult) {
   await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
 }
 
-async function appendAgentNavigation(traceId, url, reason, tabId) {
+async function appendAgentNavigation(
+  traceId: string,
+  url: string,
+  reason: string | null,
+  tabId: number
+): Promise<void> {
   const recorder = await getAgentRecorder(traceId);
   if (!recorder || !url) {
     return;
@@ -322,7 +427,7 @@ async function appendAgentNavigation(traceId, url, reason, tabId) {
   await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
 }
 
-async function finishAgentRecording(traceId, endedReason) {
+async function finishAgentRecording(traceId: string, endedReason: string): Promise<void> {
   const recorder = await getAgentRecorder(traceId);
   if (!recorder) {
     return;
@@ -336,7 +441,7 @@ async function finishAgentRecording(traceId, endedReason) {
   agentRecorders.delete(traceId);
 }
 
-async function persistHumanActiveState() {
+async function persistHumanActiveState(): Promise<void> {
   if (!humanRecordingState.active) {
     await chrome.storage.session.remove([AX_RECORDING_STORAGE_KEYS.HUMAN_ACTIVE]);
     return;
@@ -351,7 +456,7 @@ async function persistHumanActiveState() {
   });
 }
 
-async function getHumanRecording() {
+async function getHumanRecording(): Promise<Recording | null> {
   if (!humanRecordingState.active || !humanRecordingState.sessionId) {
     return null;
   }
@@ -367,7 +472,7 @@ async function getHumanRecording() {
   return null;
 }
 
-async function persistHumanRecording(recording) {
+async function persistHumanRecording(recording: Recording): Promise<void> {
   if (!humanRecordingState.sessionId) {
     return;
   }
@@ -375,7 +480,7 @@ async function persistHumanRecording(recording) {
   await persistRecording(key, recording);
 }
 
-async function appendHumanAxSnapshot(axTree, tabId) {
+async function appendHumanAxSnapshot(axTree: AxSnapshot, tabId: number): Promise<void> {
   const recording = await getHumanRecording();
   if (!recording) {
     return;
@@ -391,7 +496,11 @@ async function appendHumanAxSnapshot(axTree, tabId) {
   await persistHumanRecording(recording);
 }
 
-async function appendHumanAction(eventPayload, target, tabId) {
+async function appendHumanAction(
+  eventPayload: HumanActionPayload,
+  target: Record<string, unknown>,
+  tabId: number
+): Promise<void> {
   const recording = await getHumanRecording();
   if (!recording) {
     return;
@@ -400,14 +509,14 @@ async function appendHumanAction(eventPayload, target, tabId) {
     t: eventPayload.timestamp || new Date().toISOString(),
     kind: "human_action",
     source: "human",
-    step: {
-      step_id: eventPayload.event_id || crypto.randomUUID(),
-      action_type: eventPayload.action_type,
-      target,
-      value: eventPayload.value ?? null,
-      timeout_ms: null,
-      retries: 0,
-    },
+      step: {
+        step_id: eventPayload.event_id || crypto.randomUUID(),
+        action_type: eventPayload.action_type,
+        target,
+        value: eventPayload.value ?? null,
+        timeout_ms: null as number | null,
+        retries: 0,
+      },
     url: eventPayload.url || null,
     tab_id: tabId ?? null,
   };
@@ -415,49 +524,54 @@ async function appendHumanAction(eventPayload, target, tabId) {
   await persistHumanRecording(recording);
 }
 
-async function resolveBackendNodeId(tabId, selector) {
+async function resolveBackendNodeId(tabId: number, selector: string): Promise<number | null> {
   if (!selector) {
     return null;
   }
   try {
-    const documentResult = await sendCDPCommand(tabId, "DOM.getDocument", { depth: 0 });
+    const documentResult = (await sendCDPCommand(tabId, "DOM.getDocument", {
+      depth: 0,
+    })) as any;
     const rootId = documentResult?.root?.nodeId;
     if (!rootId) {
       return null;
     }
-    const queryResult = await sendCDPCommand(tabId, "DOM.querySelector", {
+    const queryResult = (await sendCDPCommand(tabId, "DOM.querySelector", {
       nodeId: rootId,
       selector,
-    });
+    })) as any;
     const nodeId = queryResult?.nodeId;
     if (!nodeId) {
       return null;
     }
-    const node = await sendCDPCommand(tabId, "DOM.describeNode", { nodeId });
+    const node = (await sendCDPCommand(tabId, "DOM.describeNode", { nodeId })) as any;
     return node?.node?.backendNodeId || null;
   } catch (err) {
     return null;
   }
 }
 
-async function resolveBackendNodeIdFromRect(tabId, rect) {
+async function resolveBackendNodeIdFromRect(
+  tabId: number,
+  rect: { x: number; y: number; width: number; height: number } | null
+): Promise<number | null> {
   if (!rect) {
     return null;
   }
   try {
     const x = Math.round(rect.x + rect.width / 2);
     const y = Math.round(rect.y + rect.height / 2);
-    const hit = await sendCDPCommand(tabId, "DOM.getNodeForLocation", {
+    const hit = (await sendCDPCommand(tabId, "DOM.getNodeForLocation", {
       x,
       y,
       includeUserAgentShadowDOM: true,
       ignorePointerEventsNone: true,
-    });
+    })) as any;
     if (hit?.backendNodeId) {
       return hit.backendNodeId;
     }
     if (hit?.nodeId) {
-      const node = await sendCDPCommand(tabId, "DOM.describeNode", { nodeId: hit.nodeId });
+      const node = (await sendCDPCommand(tabId, "DOM.describeNode", { nodeId: hit.nodeId })) as any;
       return node?.node?.backendNodeId || null;
     }
   } catch (err) {
@@ -466,7 +580,11 @@ async function resolveBackendNodeIdFromRect(tabId, rect) {
   return null;
 }
 
-async function resolveHumanActionTarget(tabId, eventPayload, axTree) {
+async function resolveHumanActionTarget(
+  tabId: number,
+  eventPayload: HumanActionPayload,
+  axTree: AxSnapshot
+): Promise<Record<string, unknown>> {
   const selector = eventPayload?.target?.selector || null;
   const rect = eventPayload?.target?.bounding_rect || null;
   const backendNodeId =
@@ -483,7 +601,7 @@ async function resolveHumanActionTarget(tabId, eventPayload, axTree) {
   return buildTargetFromAxMatch(axMatch, fallback);
 }
 
-async function setHumanRecordingEnabled(tabId, enabled) {
+async function setHumanRecordingEnabled(tabId: number, enabled: boolean): Promise<void> {
   try {
     await sendMessageWithInjection(tabId, {
       type: "vw-axrec-human-enable",
@@ -496,7 +614,7 @@ async function setHumanRecordingEnabled(tabId, enabled) {
   }
 }
 
-async function enrollHumanTab(tabId) {
+async function enrollHumanTab(tabId: number): Promise<void> {
   if (!isDebugRecordingEnabled() || !humanRecordingState.active || !tabId) {
     return;
   }
@@ -508,7 +626,7 @@ async function enrollHumanTab(tabId) {
   await setHumanRecordingEnabled(tabId, true);
 }
 
-async function captureHumanSnapshotForTab(tabId) {
+async function captureHumanSnapshotForTab(tabId: number): Promise<AxSnapshot | null> {
   if (!isDebugRecordingEnabled() || !humanRecordingState.active || !tabId) {
     return null;
   }
@@ -522,7 +640,7 @@ async function captureHumanSnapshotForTab(tabId) {
   }
 }
 
-async function stopHumanRecording(activeTabId) {
+async function stopHumanRecording(activeTabId?: number): Promise<{ status: string; error?: string }> {
   if (!humanRecordingState.active || !humanRecordingState.sessionId) {
     return { status: "error", error: "No active human recording session." };
   }
@@ -543,19 +661,19 @@ async function stopHumanRecording(activeTabId) {
     active: false,
     sessionId: null,
     recording: null,
-    enrolledTabs: new Set(),
+        enrolledTabs: new Set<number>(),
     promptText: "",
     startedAt: null,
   };
   await chrome.storage.session.remove([AX_RECORDING_STORAGE_KEYS.HUMAN_ACTIVE]);
-  for (const tabId of enrolledTabs) {
+  for (const tabId of enrolledTabs as number[]) {
     await setHumanRecordingEnabled(tabId, false);
     await detachDebugger(tabId);
   }
   return { status: "ok" };
 }
 
-async function loadHumanRecordingState() {
+async function loadHumanRecordingState(): Promise<void> {
   if (!isDebugRecordingEnabled()) {
     return;
   }
@@ -568,7 +686,7 @@ async function loadHumanRecordingState() {
   humanRecordingState.sessionId = activeState.session_id;
   humanRecordingState.promptText = activeState.prompt_text || "";
   humanRecordingState.startedAt = activeState.started_at || null;
-  humanRecordingState.enrolledTabs = new Set(activeState.enrolled_tabs || []);
+  humanRecordingState.enrolledTabs = new Set<number>(activeState.enrolled_tabs || []);
   for (const tabId of humanRecordingState.enrolledTabs) {
     await setHumanRecordingEnabled(tabId, true);
   }

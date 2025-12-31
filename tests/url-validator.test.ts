@@ -1,10 +1,13 @@
-const assert = require("assert");
+import * as assert from "assert";
+import * as path from "path";
 
-const { isValidNavigationUrl } = require("../../extension/lib/url-validator.js");
+const { isValidNavigationUrl } = require(
+  path.resolve(__dirname, "..", "..", "extension", "dist", "lib", "url-validator.js")
+);
 
 let failures = 0;
 
-const test = (name, fn) => {
+const test = (name: string, fn: () => void) => {
   try {
     fn();
     console.log(`✓ ${name}`);
@@ -62,4 +65,3 @@ process.on("exit", () => {
   }
   console.log("All url-validator tests passed.");
 });
-

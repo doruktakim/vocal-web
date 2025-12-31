@@ -3,7 +3,7 @@
  * Bypasses the full Interpreter/Navigator pipeline for instant response.
  */
 
-const FAST_COMMAND_PATTERNS = [
+const FAST_COMMAND_PATTERNS: FastCommandPattern[] = [
   // Scroll down commands
   {
     patterns: [
@@ -85,7 +85,7 @@ const FAST_COMMAND_PATTERNS = [
 ];
 
 // Keywords that suggest a command might be a fast command (for quick pre-filtering)
-const FAST_COMMAND_KEYWORDS = [
+const FAST_COMMAND_KEYWORDS: string[] = [
   'scroll', 'up', 'down', 'back', 'forward',
   'refresh', 'reload', 'top', 'bottom', 'page',
   'previous', 'next', 'return'
@@ -97,7 +97,7 @@ const FAST_COMMAND_KEYWORDS = [
  * @param {string} transcript - The user's voice command
  * @returns {boolean}
  */
-function isProbablyFastCommand(transcript) {
+function isProbablyFastCommand(transcript: string): boolean {
   if (!transcript) return false;
   const lower = transcript.toLowerCase();
   // If the transcript is too long, it's probably a complex command
@@ -110,7 +110,7 @@ function isProbablyFastCommand(transcript) {
  * @param {string} transcript - The user's voice command
  * @returns {object|null} - The matched action or null if no match
  */
-function matchFastCommand(transcript) {
+function matchFastCommand(transcript: string): FastCommandAction | null {
   if (!transcript) return null;
 
   const normalized = transcript.toLowerCase().trim();
@@ -132,7 +132,8 @@ function matchFastCommand(transcript) {
 }
 
 // Export for use in background.js (service worker context)
-if (typeof globalThis !== 'undefined') {
-  globalThis.matchFastCommand = matchFastCommand;
-  globalThis.isProbablyFastCommand = isProbablyFastCommand;
+if (typeof globalThis !== "undefined") {
+  const target = globalThis as GlobalThis;
+  target.matchFastCommand = matchFastCommand;
+  target.isProbablyFastCommand = isProbablyFastCommand;
 }

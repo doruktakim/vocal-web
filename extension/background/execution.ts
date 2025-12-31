@@ -1,12 +1,12 @@
 async function fetchActionPlan(
-  apiBase,
-  transcript,
-  traceId,
-  pageContext,
-  clarificationResponse,
-  clarificationHistory = []
-) {
-  const metadata = {};
+  apiBase: string,
+  transcript: string,
+  traceId: string,
+  pageContext: AxTree | null,
+  clarificationResponse: string | null,
+  clarificationHistory: ClarificationHistoryEntry[] = []
+): Promise<ActionPlan | ClarificationRequest> {
+  const metadata: Record<string, unknown> = {};
   if (pageContext?.page_url) {
     metadata.page_url = pageContext.page_url;
     try {
@@ -28,7 +28,11 @@ async function fetchActionPlan(
     transcript,
     metadata,
   };
-  return authorizedRequest(apiBase, "/api/interpreter/actionplan", body);
+  return authorizedRequest<ActionPlan | ClarificationRequest>(
+    apiBase,
+    "/api/interpreter/actionplan",
+    body
+  );
 }
 
 /**
@@ -40,8 +44,14 @@ async function fetchActionPlan(
  * @param {string|null} phase - Optional planning phase hint
  * @returns {Promise<object>} - Execution plan or clarification
  */
-async function fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId, phase = null) {
-  const body = {
+async function fetchAxExecutionPlan(
+  apiBase: string,
+  actionPlan: ActionPlan,
+  axTree: AxTree,
+  traceId: string,
+  phase: string | null = null
+): Promise<ExecutionPlan | ClarificationRequest> {
+  const body: Record<string, unknown> = {
     schema_version: "axnavigator_v1",
     id: crypto.randomUUID(),
     trace_id: traceId,
@@ -51,7 +61,11 @@ async function fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId, phase 
   if (phase) {
     body.phase = phase;
   }
-  return authorizedRequest(apiBase, "/api/navigator/ax-executionplan", body);
+  return authorizedRequest<ExecutionPlan | ClarificationRequest>(
+    apiBase,
+    "/api/navigator/ax-executionplan",
+    body
+  );
 }
 
 /**
@@ -61,16 +75,43 @@ async function fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId, phase 
  * @param {string} traceId - Trace ID for logging
  * @returns {Promise<object>} - Execution outcome { result, axTree, axDiffs }
  */
-async function executeAxPlanViaCDP(tabId, executionPlan, traceId, options = {}) {
-  const stepResults = [];
-  const errors = [];
-  const axDiffs = [];
+async function executeAxPlanViaCDP(
+  tabId: number,
+  executionPlan: ExecutionPlan,
+  traceId: string,
+  options: {
+    axTree?: AxTree | null;
+    captureAxDiff?: boolean;
+    postStepDelayMs?: number;
+    onAxDiff?: (payload: { step: ExecutionStep; axDiff: AxDiff; axTree: AxTree | null }) => {
+      stop?: boolean;
+      reason?: string;
+      phase?: string;
+      focus_backend_ids?: number[];
+      trigger_backend_node_id?: number | null;
+    } | null;
+  } = {}
+) {
+  const stepResults: Array<{
+    step_id?: string;
+    status: string;
+    error?: string | null;
+    duration_ms?: number;
+  }> = [];
+  const errors: Array<{ step_id?: string; error?: string | null }> = [];
+  const axDiffs: AxDiff[] = [];
   let currentAxTree = options.axTree || null;
   const captureAxDiff = Boolean(options.captureAxDiff);
   const postStepDelayMs = Number.isFinite(options.postStepDelayMs) ? options.postStepDelayMs : 150;
-  let interruption = null;
+  let interruption: {
+    stop?: boolean;
+    reason?: string;
+    phase?: string;
+    focus_backend_ids?: number[];
+    trigger_backend_node_id?: number | null;
+  } | null = null;
 
-  const maybeCaptureDiff = async (step) => {
+  const maybeCaptureDiff = async (step: ExecutionStep): Promise<void> => {
     if (postStepDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, postStepDelayMs));
     }
@@ -86,7 +127,10 @@ async function executeAxPlanViaCDP(tabId, executionPlan, traceId, options = {}) 
       );
       currentAxTree = axTree;
       if (axDiff) {
-        axDiffs.push({ step_id: step?.step_id, diff: axDiff });
+        if (step?.step_id && !axDiff.step_id) {
+          axDiff.step_id = step.step_id;
+        }
+        axDiffs.push(axDiff);
         if (typeof options.onAxDiff === "function" && !interruption) {
           const decision = options.onAxDiff({
             step,
@@ -204,9 +248,9 @@ async function executeAxPlanViaCDP(tabId, executionPlan, traceId, options = {}) 
   };
 }
 
-async function sendExecutionResult(apiBase, result) {
+async function sendExecutionResult(apiBase: string, result: ExecutionResult): Promise<void> {
   try {
-    await authorizedRequest(apiBase, "/api/execution/result", result, false);
+    await authorizedRequest<null>(apiBase, "/api/execution/result", result, false);
   } catch (err) {
     if (err instanceof AuthenticationError) {
       console.warn("Execution result rejected due to authentication failure.");
@@ -216,7 +260,10 @@ async function sendExecutionResult(apiBase, result) {
   }
 }
 
-async function executeFastCommandViaCDP(tabId, action) {
+async function executeFastCommandViaCDP(
+  tabId: number,
+  action: FastCommandAction
+): Promise<{ status: string; action_type?: string; error?: string }> {
   const type = action?.type;
   if (!type) {
     return { status: "error", error: "Missing fast command type." };
@@ -265,27 +312,27 @@ async function executeFastCommandViaCDP(tabId, action) {
   }
 }
 
-function shouldAskHumanClarification(clarification) {
+function shouldAskHumanClarification(clarification: ClarificationRequest | null | undefined): boolean {
   if (!clarification || !clarification.reason) {
     return true;
   }
   return HUMAN_CLARIFICATION_REASONS.has(clarification.reason);
 }
 
-async function persistLastDebug(payload) {
+async function persistLastDebug(payload: unknown): Promise<void> {
   if (!payload) {
     return;
   }
   await chrome.storage.session.set({ [LAST_DEBUG_STORAGE_KEY]: payload });
 }
 
-async function readLastDebug() {
+async function readLastDebug(): Promise<unknown | null> {
   const stored = await chrome.storage.session.get([LAST_DEBUG_STORAGE_KEY]);
   return stored[LAST_DEBUG_STORAGE_KEY] || null;
 }
 
-function collectBackendIdsFromDiff(axDiff) {
-  const ids = new Set();
+function collectBackendIdsFromDiff(axDiff: AxDiff | null | undefined): Set<number> {
+  const ids = new Set<number>();
   const added = Array.isArray(axDiff?.added) ? axDiff.added : [];
   const changed = Array.isArray(axDiff?.changed) ? axDiff.changed : [];
   for (const el of added) {
@@ -302,12 +349,21 @@ function collectBackendIdsFromDiff(axDiff) {
   return ids;
 }
 
-function buildElementsByBackendId(axTree) {
+function buildElementsByBackendId(axTree: AxTree | null | undefined): Map<number, { name?: string }> {
   const elements = Array.isArray(axTree?.elements) ? axTree.elements : [];
-  return new Map(elements.map((el) => [el.backend_node_id, el]));
+  const map = new Map<number, { name?: string }>();
+  elements.forEach((el) => {
+    if (typeof el?.backend_node_id === "number") {
+      map.set(el.backend_node_id, { name: el.name });
+    }
+  });
+  return map;
 }
 
-function isLikelyConfirmAction(step, elementsByBackendId) {
+function isLikelyConfirmAction(
+  step: ExecutionStep,
+  elementsByBackendId: Map<number, { name?: string }>
+): boolean {
   if (!step || step.action_type !== "click") {
     return false;
   }
@@ -320,7 +376,7 @@ function isLikelyConfirmAction(step, elementsByBackendId) {
   return keywords.some((kw) => name.includes(kw));
 }
 
-function didToggleState(change) {
+function didToggleState(change: AxDiffChange | undefined): boolean {
   const before = change?.before;
   const after = change?.after;
   if (!before || !after) {
@@ -335,7 +391,7 @@ function didToggleState(change) {
   );
 }
 
-function isTrivialSelfChange(axDiff, step) {
+function isTrivialSelfChange(axDiff: AxDiff | null | undefined, step: ExecutionStep): boolean {
   const added = Array.isArray(axDiff?.added) ? axDiff.added : [];
   const changed = Array.isArray(axDiff?.changed) ? axDiff.changed : [];
   if (added.length !== 0 || changed.length !== 1) {
@@ -352,7 +408,7 @@ function isTrivialSelfChange(axDiff, step) {
   return !didToggleState(change);
 }
 
-function isRelevantInteractionDiff(axDiff, step) {
+function isRelevantInteractionDiff(axDiff: AxDiff | null | undefined, step: ExecutionStep): boolean {
   if (!axDiff || !step) {
     return false;
   }
@@ -374,7 +430,7 @@ function isRelevantInteractionDiff(axDiff, step) {
   return added.length >= 1 && changed.length >= 1;
 }
 
-function shouldReplanForInteraction(axDiff, step) {
+function shouldReplanForInteraction(axDiff: AxDiff | null | undefined, step: ExecutionStep): boolean {
   if (!step) {
     return false;
   }
@@ -390,12 +446,12 @@ function shouldReplanForInteraction(axDiff, step) {
  * Uses accessibility tree and CDP for element interaction.
  */
 async function runDemoFlowInternalAX(
-  transcript,
-  tabId,
-  clarificationResponse,
-  clarificationHistory = []
-) {
-  let traceId = null;
+  transcript: string,
+  tabId: number,
+  clarificationResponse: string | null,
+  clarificationHistory: ClarificationHistoryEntry[] = []
+): Promise<AgentResponse> {
+  let traceId: string | null = null;
   try {
     // FAST PATH: Check for simple commands first (only on fresh commands)
     if (!clarificationResponse) {
@@ -420,7 +476,7 @@ async function runDemoFlowInternalAX(
     await attachDebugger(tabId);
 
     // Collect AX tree instead of DOMMap
-    let axTree = await collectAccessibilityTree(tabId, traceId);
+    let axTree: AxTree = await collectAccessibilityTree(tabId, traceId);
 
     // Get action plan from interpreter
     const actionPlan = await fetchActionPlan(
@@ -434,7 +490,7 @@ async function runDemoFlowInternalAX(
 
     if (actionPlan.schema_version === "clarification_v1") {
       await finishAgentRecording(traceId, "clarification");
-      if (shouldAskHumanClarification(actionPlan)) {
+      if (shouldAskHumanClarification(actionPlan as ClarificationRequest)) {
         return { status: "needs_clarification", actionPlan, axTree };
       }
       // For AX mode, we can't easily do fallback clicks, return clarification
@@ -442,7 +498,8 @@ async function runDemoFlowInternalAX(
     }
 
     // Check if we need to navigate first
-    const desiredUrl = actionPlan?.entities?.url || actionPlan?.value;
+    const resolvedActionPlan = actionPlan as ActionPlan;
+    const desiredUrl = resolvedActionPlan?.entities?.url || resolvedActionPlan?.value;
     const currentUrl = axTree?.page_url || "";
     const needsNavigation =
       desiredUrl && !currentUrl.includes(desiredUrl.replace(/^https?:\/\//, "").split("/")[0]);
@@ -454,7 +511,7 @@ async function runDemoFlowInternalAX(
       // Save pending plan BEFORE navigation
       await savePendingPlan(tabId, {
         traceId,
-        actionPlan,
+        actionPlan: resolvedActionPlan,
         transcript,
         apiBase,
         savedAt: Date.now(),
@@ -468,35 +525,44 @@ async function runDemoFlowInternalAX(
       return {
         status: "navigating",
         message: `Navigating to ${desiredUrl}. Actions will continue after page loads.`,
-        actionPlan,
+        actionPlan: resolvedActionPlan,
         axTree,
       };
     }
 
     // No navigation needed, proceed with execution
-    let executionPlan = null;
-    let execResult = null;
-    let axDiffs = [];
-    let planPhase = null;
-    let planFocusBackendIds = null;
-    let planTriggerNodeId = null;
+    let executionPlan: ExecutionPlan | ClarificationRequest | null = null;
+    let execResult: ExecutionResult | null = null;
+    let axDiffs: AxDiff[] = [];
+    let resolvedExecutionPlan: ExecutionPlan | null = null;
+    let planPhase: string | null = null;
+    let planFocusBackendIds: Set<number> | null = null;
+    let planTriggerNodeId: number | null = null;
     let replanCount = 0;
     const maxReplans = 1;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       // Fetch execution plan using AX tree
-      executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId, planPhase);
+      executionPlan = await fetchAxExecutionPlan(
+        apiBase,
+        resolvedActionPlan,
+        axTree,
+        traceId,
+        planPhase
+      );
 
       if (executionPlan.schema_version === "clarification_v1") {
         await finishAgentRecording(traceId, "clarification");
-        if (shouldAskHumanClarification(executionPlan)) {
+        if (shouldAskHumanClarification(executionPlan as ClarificationRequest)) {
           return { status: "needs_clarification", executionPlan, axTree };
         }
         return { status: "needs_clarification", executionPlan, axTree };
       }
 
+      resolvedExecutionPlan = executionPlan as ExecutionPlan;
+
       if (planPhase === "post_interaction") {
-        const originalSteps = executionPlan.steps || [];
+        const originalSteps = resolvedExecutionPlan.steps || [];
         const elementsByBackendId = buildElementsByBackendId(axTree);
         let filtered = originalSteps;
         if (planFocusBackendIds && planFocusBackendIds.size) {
@@ -519,19 +585,19 @@ async function runDemoFlowInternalAX(
               !(step.action_type === "click" && step.backend_node_id === planTriggerNodeId)
           );
         }
-        executionPlan.steps = filtered;
+        resolvedExecutionPlan.steps = filtered;
       }
 
-      await appendAgentDecisions(traceId, executionPlan, axTree);
+      await appendAgentDecisions(traceId, resolvedExecutionPlan, axTree);
       await persistLastDebug({
         status: "planned",
-        actionPlan,
-        executionPlan,
+        actionPlan: resolvedActionPlan,
+        executionPlan: resolvedExecutionPlan,
         axTree,
       });
 
       // Check if the plan contains navigation steps
-      const navStep = (executionPlan.steps || []).find(
+      const navStep = (resolvedExecutionPlan.steps || []).find(
         (s) => s.action_type === "navigate" || s.action_type === "open_site"
       );
 
@@ -540,13 +606,13 @@ async function runDemoFlowInternalAX(
         await appendAgentNavigation(traceId, navStep.value, "execution_plan_navigation", tabId);
 
         // Remove the nav step and save remaining steps as pending
-        const remainingSteps = (executionPlan.steps || []).filter((s) => s !== navStep);
+        const remainingSteps = (resolvedExecutionPlan.steps || []).filter((s) => s !== navStep);
 
         if (remainingSteps.length > 0) {
           // Create a modified action plan for post-navigation
           await savePendingPlan(tabId, {
             traceId,
-            actionPlan,
+            actionPlan: resolvedActionPlan,
             transcript,
             apiBase,
             savedAt: Date.now(),
@@ -561,8 +627,8 @@ async function runDemoFlowInternalAX(
           return {
             status: "navigating",
             message: `Navigating to ${navStep.value}. Actions will continue after page loads.`,
-            actionPlan,
-            executionPlan,
+            actionPlan: resolvedActionPlan,
+            executionPlan: resolvedExecutionPlan,
             axTree,
           };
         }
@@ -574,20 +640,20 @@ async function runDemoFlowInternalAX(
         };
         await appendAgentResults(traceId, execResult);
         await finishAgentRecording(traceId, "completed");
-        const completedPayload = {
+        const completedPayload: AgentResponse = {
           status: "completed",
-          actionPlan,
-          executionPlan,
+          actionPlan: resolvedActionPlan,
+          executionPlan: resolvedExecutionPlan,
           execResult,
           axTree,
-          axDiffs: [],
+          axDiffs: [] as AxDiff[],
         };
         await persistLastDebug(completedPayload);
         return completedPayload;
       }
 
       // Execute non-navigation steps via CDP
-      const executionOutcome = await executeAxPlanViaCDP(tabId, executionPlan, traceId, {
+      const executionOutcome = await executeAxPlanViaCDP(tabId, resolvedExecutionPlan, traceId, {
         axTree,
         captureAxDiff: true,
         onAxDiff: ({ step, axDiff }) => {
@@ -612,8 +678,10 @@ async function runDemoFlowInternalAX(
       if (Array.isArray(executionOutcome.axDiffs) && executionOutcome.axDiffs.length) {
         axDiffs.push(...executionOutcome.axDiffs);
       }
-      await sendExecutionResult(apiBase, execResult);
-      await appendAgentResults(traceId, execResult);
+      if (execResult) {
+        await sendExecutionResult(apiBase, execResult);
+        await appendAgentResults(traceId, execResult);
+      }
 
       if (executionOutcome.interrupted && executionOutcome.interruption?.phase) {
         replanCount += 1;
@@ -643,10 +711,10 @@ async function runDemoFlowInternalAX(
 
     const endedReason = execResult?.errors?.length ? "failed" : "completed";
     await finishAgentRecording(traceId, endedReason);
-    const completedPayload = {
+    const completedPayload: AgentResponse = {
       status: "completed",
-      actionPlan,
-      executionPlan,
+      actionPlan: resolvedActionPlan,
+      executionPlan: resolvedExecutionPlan || undefined,
       execResult,
       axTree,
       axDiffs,
@@ -662,11 +730,11 @@ async function runDemoFlowInternalAX(
 }
 
 async function runDemoFlow(
-  transcript,
-  tabId,
-  clarificationResponse,
-  clarificationHistory = []
-) {
+  transcript: string,
+  tabId: number,
+  clarificationResponse: string | null,
+  clarificationHistory: ClarificationHistoryEntry[] = []
+): Promise<AgentResponse> {
   try {
     return await runDemoFlowInternalAX(transcript, tabId, clarificationResponse, clarificationHistory);
   } catch (err) {

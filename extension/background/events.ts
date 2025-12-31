@@ -1,5 +1,5 @@
 // Clean up debugger when tab is closed
-chrome.tabs.onRemoved.addListener((tabId) => {
+chrome.tabs.onRemoved.addListener((tabId: number) => {
   if (debuggerAttached.has(tabId)) {
     debuggerAttached.delete(tabId);
   }
@@ -12,7 +12,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   pendingNavigationTabs.delete(tabId);
 });
 
-chrome.tabs.onCreated.addListener((tab) => {
+chrome.tabs.onCreated.addListener((tab: ChromeTabInfo) => {
   if (!isDebugRecordingEnabled() || !humanRecordingState.active) {
     return;
   }
@@ -21,7 +21,7 @@ chrome.tabs.onCreated.addListener((tab) => {
   }
 });
 
-chrome.tabs.onActivated.addListener((activeInfo) => {
+chrome.tabs.onActivated.addListener((activeInfo: ChromeActiveInfo) => {
   if (!isDebugRecordingEnabled() || !humanRecordingState.active) {
     return;
   }
@@ -30,7 +30,7 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
   }
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+chrome.tabs.onUpdated.addListener((tabId: number, changeInfo: ChromeTabChangeInfo) => {
   if (!isDebugRecordingEnabled() || !humanRecordingState.active) {
     return;
   }
@@ -44,7 +44,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   captureHumanSnapshotForTab(tabId);
 });
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
+chrome.storage.onChanged.addListener((changes: ChromeStorageChanges, areaName: string) => {
   if (areaName !== "sync") {
     return;
   }
@@ -56,7 +56,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   setDebugRecordingEnabled(enabled);
 });
 
-loadDebugRecordingFlag().then((enabled) => {
+loadDebugRecordingFlag().then((enabled: boolean) => {
   if (enabled) {
     loadHumanRecordingState();
   }

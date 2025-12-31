@@ -10,20 +10,31 @@
 
   let humanRecordingEnabled = false;
 
-  const cssEscapeValue = (value) => {
+  type HumanTargetPayload = {
+    selector: string | null;
+    tag: string;
+    role: string | null;
+    name: string | null;
+    aria_label: string | null;
+    placeholder: string | null;
+    text: string | null;
+    bounding_rect: { x: number; y: number; width: number; height: number };
+  };
+
+  const cssEscapeValue = (value: string) => {
     if (window.CSS && typeof window.CSS.escape === "function") {
       return window.CSS.escape(value);
     }
     return String(value).replace(/["\\]/g, "\\$&");
   };
 
-  const buildCssSelector = (el) => {
+  const buildCssSelector = (el: Element | null): string | null => {
     if (!el || el.nodeType !== 1) return null;
     if (el.id) {
       return `#${cssEscapeValue(el.id)}`;
     }
     const segments = [];
-    let current = el;
+    let current: Element | null = el;
     for (let depth = 0; depth < 4 && current && current.nodeType === 1; depth += 1) {
       let selector = (current.tagName || "").toLowerCase();
       const className = (current.getAttribute("class") || "").trim();
@@ -35,9 +46,9 @@
       }
       const parent = current.parentElement;
       if (parent) {
-        const siblings = Array.from(parent.children).filter(
-          (child) => child.tagName === current.tagName
-        );
+      const siblings = (Array.from(parent.children) as Element[]).filter(
+        (child) => child.tagName === current.tagName
+      );
         if (siblings.length > 1) {
           const index = siblings.indexOf(current) + 1;
           selector += `:nth-of-type(${index})`;
@@ -49,7 +60,7 @@
     return segments.join(" > ");
   };
 
-  const buildHumanTargetPayload = (el) => {
+  const buildHumanTargetPayload = (el: HTMLElement): HumanTargetPayload => {
     const rect = el.getBoundingClientRect();
     return {
       selector: buildCssSelector(el),
@@ -68,30 +79,33 @@
     };
   };
 
-  const getHumanEventValue = (el, eventType) => {
+  const getHumanEventValue = (el: HTMLElement, eventType: string): string | null => {
     if (eventType !== "change") {
       return null;
     }
     if (detectSensitiveField(el)) {
       return null;
     }
-    const rawValue = el.value;
+    if (!("value" in el)) {
+      return null;
+    }
+    const rawValue = (el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value;
     return rawValue ?? null;
   };
 
-  const mapEventToActionType = (eventType) => {
+  const mapEventToActionType = (eventType: string): string => {
     if (eventType === "click") return "click";
     if (eventType === "change") return "input";
     if (eventType === "submit") return "submit";
     return eventType;
   };
 
-  const handleHumanRecordingEvent = (event) => {
+  const handleHumanRecordingEvent = (event: Event) => {
     if (!humanRecordingEnabled || !event?.isTrusted) {
       return;
     }
     const target = event.target;
-    if (!target || target.nodeType !== 1) {
+    if (!target || !(target instanceof HTMLElement)) {
       return;
     }
     const payload = {
@@ -110,12 +124,18 @@
     document.addEventListener(type, handleHumanRecordingEvent, true);
   });
 
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message?.type === "vw-axrec-human-enable") {
-      humanRecordingEnabled = Boolean(message.enabled);
-      sendResponse({ status: "ok", enabled: humanRecordingEnabled });
-      return true;
+  chrome.runtime.onMessage.addListener(
+    (
+      message: { type?: string; enabled?: boolean },
+      _sender: unknown,
+      sendResponse: (response: { status: string; enabled: boolean }) => void
+    ) => {
+      if (message?.type === "vw-axrec-human-enable") {
+        humanRecordingEnabled = Boolean(message.enabled);
+        sendResponse({ status: "ok", enabled: humanRecordingEnabled });
+        return true;
+      }
+      return false;
     }
-    return false;
-  });
+  );
 })();

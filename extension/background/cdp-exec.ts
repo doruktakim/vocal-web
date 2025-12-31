@@ -7,7 +7,7 @@
  * @param {number} tabId - The tab ID
  * @param {number} backendNodeId - The backend DOM node ID
  */
-async function cdpFocusElement(tabId, backendNodeId) {
+async function cdpFocusElement(tabId: number, backendNodeId: number): Promise<void> {
   await sendCDPCommand(tabId, "DOM.focus", { backendNodeId });
 }
 
@@ -16,7 +16,7 @@ async function cdpFocusElement(tabId, backendNodeId) {
  * @param {number} tabId - The tab ID
  * @param {number} backendNodeId - The backend DOM node ID
  */
-async function cdpScrollIntoView(tabId, backendNodeId) {
+async function cdpScrollIntoView(tabId: number, backendNodeId: number): Promise<void> {
   await sendCDPCommand(tabId, "DOM.scrollIntoViewIfNeeded", { backendNodeId });
 }
 
@@ -26,9 +26,12 @@ async function cdpScrollIntoView(tabId, backendNodeId) {
  * @param {number} backendNodeId - The backend DOM node ID
  * @returns {Promise<{x: number, y: number, width: number, height: number}|null>}
  */
-async function cdpGetElementBox(tabId, backendNodeId) {
+async function cdpGetElementBox(
+  tabId: number,
+  backendNodeId: number
+): Promise<{ x: number; y: number; width: number; height: number } | null> {
   try {
-    const result = await sendCDPCommand(tabId, "DOM.getBoxModel", { backendNodeId });
+    const result = (await sendCDPCommand(tabId, "DOM.getBoxModel", { backendNodeId })) as any;
     if (!result?.model?.content) {
       return null;
     }
@@ -54,7 +57,13 @@ async function cdpGetElementBox(tabId, backendNodeId) {
  * @param {number} y - Y coordinate
  * @param {string} button - Mouse button (left, middle, right)
  */
-async function cdpDispatchMouseEvent(tabId, type, x, y, button = "left") {
+async function cdpDispatchMouseEvent(
+  tabId: number,
+  type: string,
+  x: number,
+  y: number,
+  button = "left"
+): Promise<void> {
   await sendCDPCommand(tabId, "Input.dispatchMouseEvent", {
     type,
     x,
@@ -69,7 +78,7 @@ async function cdpDispatchMouseEvent(tabId, type, x, y, button = "left") {
  * @param {number} tabId - The tab ID
  * @param {number} backendNodeId - The backend DOM node ID
  */
-async function cdpClickElement(tabId, backendNodeId) {
+async function cdpClickElement(tabId: number, backendNodeId: number): Promise<void> {
   // Scroll element into view first
   await cdpScrollIntoView(tabId, backendNodeId);
   // Small delay for scroll to complete
@@ -93,7 +102,12 @@ async function cdpClickElement(tabId, backendNodeId) {
  * @param {string} text - Text to input
  * @param {boolean} clearFirst - Whether to clear existing value first
  */
-async function cdpInputText(tabId, backendNodeId, text, clearFirst = true) {
+async function cdpInputText(
+  tabId: number,
+  backendNodeId: number,
+  text: string,
+  clearFirst = true
+): Promise<void> {
   // Focus the element first
   await cdpFocusElement(tabId, backendNodeId);
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -134,7 +148,10 @@ async function cdpInputText(tabId, backendNodeId, text, clearFirst = true) {
  * @param {object} step - Execution step with action_type, backend_node_id, value
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-async function cdpExecuteStep(tabId, step) {
+async function cdpExecuteStep(
+  tabId: number,
+  step: ExecutionStep
+): Promise<{ success: boolean; error?: string }> {
   try {
     const { action_type, backend_node_id, value } = step;
 
@@ -207,6 +224,7 @@ async function cdpExecuteStep(tabId, step) {
 
     return { success: true };
   } catch (err) {
-    return { success: false, error: err.message };
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
   }
 }

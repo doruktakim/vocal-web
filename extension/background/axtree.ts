@@ -3,15 +3,15 @@
  * @param {number} tabId - The tab ID
  * @returns {Promise<Array>} Array of AXNodes
  */
-async function getAccessibilityTree(tabId) {
+async function getAccessibilityTree(tabId: number): Promise<unknown[]> {
   try {
     await attachDebugger(tabId);
     // Enable accessibility domain first
     await sendCDPCommand(tabId, "Accessibility.enable");
     // Get the full accessibility tree with depth limit for performance
-    const result = await sendCDPCommand(tabId, "Accessibility.getFullAXTree", {
+    const result = (await sendCDPCommand(tabId, "Accessibility.getFullAXTree", {
       depth: 15, // Limit depth to avoid huge trees
-    });
+    })) as any;
     return result?.nodes || [];
   } catch (err) {
     console.warn("[VCAA] Failed to get accessibility tree:", err);
@@ -24,7 +24,7 @@ async function getAccessibilityTree(tabId) {
  * @param {Array} axNodes - Raw AXNodes from CDP
  * @returns {Array} Transformed elements
  */
-function transformAXTree(axNodes) {
+function transformAXTree(axNodes: unknown[]): AxTreeElement[] {
   const INTERACTIVE_ROLES = new Set([
     "button", "textbox", "combobox", "searchbox", "link",
     "menuitem", "option", "tab", "gridcell", "spinbutton",
@@ -32,9 +32,14 @@ function transformAXTree(axNodes) {
     "menuitemradio", "switch", "treeitem"
   ]);
 
-  const elements = [];
+  const toBool = (value: unknown, fallback = false): boolean =>
+    typeof value === "boolean" ? value : fallback;
+  const toNullableBool = (value: unknown): boolean | null =>
+    typeof value === "boolean" ? value : null;
 
-  for (const node of axNodes) {
+  const elements: AxTreeElement[] = [];
+
+  for (const node of axNodes as Array<Record<string, any>>) {
     // Skip ignored nodes
     if (node.ignored) continue;
 
@@ -46,7 +51,7 @@ function transformAXTree(axNodes) {
     if (!INTERACTIVE_ROLES.has(role)) continue;
 
     // Extract properties
-    const props = {};
+    const props: Record<string, unknown> = {};
     if (node.properties) {
       for (const prop of node.properties) {
         if (prop.name && prop.value !== undefined) {
@@ -58,23 +63,23 @@ function transformAXTree(axNodes) {
     elements.push({
       ax_id: node.nodeId,
       backend_node_id: node.backendDOMNodeId,
-      role: role,
+      role,
       name: node.name?.value || "",
       description: node.description?.value || "",
       value: node.value?.value || "",
-      focusable: props.focusable ?? false,
-      focused: props.focused ?? false,
-      expanded: props.expanded,
-      disabled: props.disabled ?? false,
-      checked: props.checked,
-      selected: props.selected,
+      focusable: toBool(props.focusable),
+      focused: toBool(props.focused),
+      expanded: toNullableBool(props.expanded),
+      disabled: toBool(props.disabled),
+      checked: toNullableBool(props.checked),
+      selected: toNullableBool(props.selected),
     });
   }
 
   return elements;
 }
 
-function buildAxSignature(el) {
+function buildAxSignature(el: AxTreeElement): string {
   return [
     el.role || "",
     el.name || "",
@@ -86,11 +91,11 @@ function buildAxSignature(el) {
     String(Boolean(el.disabled)),
     String(el.checked),
     String(el.selected),
-    String(el.backend_node_id || ""),
+    String(el.backend_node_id ?? ""),
   ].join("|");
 }
 
-function toAxDiffEntry(el) {
+function toAxDiffEntry(el: AxTreeElement | null | undefined): AxDiffEntry | null {
   if (!el) {
     return null;
   }
@@ -110,38 +115,46 @@ function toAxDiffEntry(el) {
   };
 }
 
-function diffAXTrees(prevTree, nextTree) {
+function diffAXTrees(prevTree: AxTree | null | undefined, nextTree: AxTree): AxDiff {
   const prevElements = Array.isArray(prevTree?.elements) ? prevTree.elements : [];
   const nextElements = Array.isArray(nextTree?.elements) ? nextTree.elements : [];
-  const prevMap = new Map();
+  const prevMap = new Map<string | number, AxTreeElement>();
 
   for (const el of prevElements) {
     if (!el?.ax_id) continue;
     prevMap.set(el.ax_id, el);
   }
 
-  const added = [];
-  const changed = [];
-  const seen = new Set();
+  const added: AxDiffEntry[] = [];
+  const changed: AxDiffChange[] = [];
+  const seen = new Set<string | number>();
 
   for (const el of nextElements) {
     if (!el?.ax_id) continue;
     const prev = prevMap.get(el.ax_id);
     if (!prev) {
-      added.push(toAxDiffEntry(el));
+      const entry = toAxDiffEntry(el);
+      if (entry) {
+        added.push(entry);
+      }
     } else if (buildAxSignature(prev) !== buildAxSignature(el)) {
+      const before = toAxDiffEntry(prev);
+      const after = toAxDiffEntry(el);
       changed.push({
-        before: toAxDiffEntry(prev),
-        after: toAxDiffEntry(el),
+        before,
+        after,
       });
     }
     seen.add(el.ax_id);
   }
 
-  const removed = [];
+  const removed: AxDiffEntry[] = [];
   for (const [axId, prev] of prevMap.entries()) {
     if (!seen.has(axId)) {
-      removed.push(toAxDiffEntry(prev));
+      const entry = toAxDiffEntry(prev);
+      if (entry) {
+        removed.push(entry);
+      }
     }
   }
 
@@ -170,7 +183,7 @@ function diffAXTrees(prevTree, nextTree) {
  * @param {string} traceId - Trace ID for logging
  * @returns {Promise<{elements: Array, page_url: string}>}
  */
-async function collectAccessibilityTree(tabId, traceId) {
+async function collectAccessibilityTree(tabId: number, traceId: string): Promise<AxTree> {
   const axNodes = await getAccessibilityTree(tabId);
   const elements = transformAXTree(axNodes);
 
@@ -179,7 +192,7 @@ async function collectAccessibilityTree(tabId, traceId) {
 
   console.log(`[VCAA] Collected ${elements.length} interactive elements from AX tree (trace_id=${traceId})`);
 
-  const payload = {
+  const payload: AxTree = {
     schema_version: "axtree_v1",
     id: crypto.randomUUID(),
     trace_id: traceId,
@@ -193,9 +206,14 @@ async function collectAccessibilityTree(tabId, traceId) {
   return payload;
 }
 
-async function captureAccessibilityTreeWithDiff(tabId, traceId, prevTree, stepId) {
+async function captureAccessibilityTreeWithDiff(
+  tabId: number,
+  traceId: string,
+  prevTree: AxTree | null | undefined,
+  stepId?: string
+): Promise<{ axTree: AxTree; axDiff: AxDiff | null }> {
   const nextTree = await collectAccessibilityTree(tabId, traceId);
-  const axDiff = prevTree ? diffAXTrees(prevTree, nextTree) : null;
+  const axDiff: AxDiff | null = prevTree ? diffAXTrees(prevTree, nextTree) : null;
   if (axDiff && stepId) {
     axDiff.step_id = stepId;
   }

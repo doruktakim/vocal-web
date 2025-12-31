@@ -1,51 +1,94 @@
-const transcriptField = document.getElementById("transcript");
-const apiBaseField = document.getElementById("apiBase");
-const apiKeyField = document.getElementById("apiKey");
-const apiKeyStatus = document.getElementById("apiKeyStatus");
-const toggleApiKeyVisibility = document.getElementById("toggleApiKeyVisibility");
-const apiKeyToggleIcon = document.getElementById("apiKeyToggleIcon");
-const connectionSecurityStatus = document.getElementById("connectionSecurityStatus");
-const securityIcon = connectionSecurityStatus?.querySelector(".security-icon");
-const securityText = connectionSecurityStatus?.querySelector(".security-text");
-const requireHttpsToggle = document.getElementById("requireHttps");
-const useAccessibilityTreeToggle = document.getElementById("useAccessibilityTree");
-const axModeStatus = document.getElementById("axModeStatus");
-const outputEl = document.getElementById("output");
-const debugOutputEl = document.getElementById("debugOutput");
-const debugCopyButton = document.getElementById("debugCopy");
-const clarificationPanel = document.getElementById("clarificationPanel");
-const clarificationCard = document.getElementById("clarificationCard");
-const clarificationHistoryContainer = document.getElementById("clarificationHistory");
-const runButton = document.getElementById("run");
-const micToggle = document.getElementById("micToggle");
-const micToggleText = micToggle?.querySelector(".btn-text");
-const resetClarificationButton = document.getElementById("resetClarification");
-const axrecSection = document.getElementById("axrecSection");
-const humanRecPrompt = document.getElementById("humanRecPrompt");
-const humanRecStart = document.getElementById("humanRecStart");
-const humanRecStop = document.getElementById("humanRecStop");
-const humanRecStatus = document.getElementById("humanRecStatus");
-const settingsToggle = document.getElementById("settingsToggle");
-const settingsContent = document.getElementById("settingsContent");
-const settingsChevron = document.getElementById("settingsChevron");
+(() => {
+type DebugAxElement = {
+  ax_id?: string;
+  backend_node_id?: number;
+  role?: string;
+  name?: string;
+  description?: string;
+  value?: string;
+  focusable?: boolean;
+  focused?: boolean;
+  disabled?: boolean;
+  checked?: boolean;
+  selected?: boolean;
+  expanded?: boolean;
+};
+
+type DebugAxTree = { elements?: DebugAxElement[] };
+type DebugPayload = AgentResponse & { axTree?: DebugAxTree };
+type SecurityState = { isSecure?: boolean; requireHttps?: boolean };
+type SecurityStateResponse = { status?: string; state?: SecurityState };
+type RunDemoResponse = AgentResponse & {
+  status?: string;
+  message?: string;
+  fastPath?: boolean;
+  action?: FastCommandAction;
+  execResult?: ExecutionResult & { duration_ms?: number };
+};
+type ClarificationPlan = ClarificationRequest & {
+  options?: Array<{
+    label?: string;
+    candidate_element_ids?: Array<string | number>;
+  }>;
+};
+type HumanRecordingStatus = {
+  status?: string;
+  error?: string;
+  active?: boolean;
+  enrolled_tabs?: number[];
+};
+
+const transcriptField = document.getElementById("transcript") as HTMLTextAreaElement | null;
+const apiBaseField = document.getElementById("apiBase") as HTMLInputElement | null;
+const apiKeyField = document.getElementById("apiKey") as HTMLInputElement | null;
+const apiKeyStatus = document.getElementById("apiKeyStatus") as HTMLElement | null;
+const toggleApiKeyVisibility = document.getElementById("toggleApiKeyVisibility") as HTMLElement | null;
+const apiKeyToggleIcon = document.getElementById("apiKeyToggleIcon") as HTMLElement | null;
+const connectionSecurityStatus = document.getElementById("connectionSecurityStatus") as HTMLElement | null;
+const securityIcon = connectionSecurityStatus?.querySelector(".security-icon") as HTMLElement | null;
+const securityText = connectionSecurityStatus?.querySelector(".security-text") as HTMLElement | null;
+const requireHttpsToggle = document.getElementById("requireHttps") as HTMLInputElement | null;
+const useAccessibilityTreeToggle = document.getElementById("useAccessibilityTree") as HTMLInputElement | null;
+const axModeStatus = document.getElementById("axModeStatus") as HTMLElement | null;
+const outputEl = document.getElementById("output") as HTMLElement | null;
+const debugOutputEl = document.getElementById("debugOutput") as HTMLElement | null;
+const debugCopyButton = document.getElementById("debugCopy") as HTMLButtonElement | null;
+const clarificationPanel = document.getElementById("clarificationPanel") as HTMLElement | null;
+const clarificationCard = document.getElementById("clarificationCard") as HTMLElement | null;
+const clarificationHistoryContainer = document.getElementById("clarificationHistory") as HTMLElement | null;
+const runButton = document.getElementById("run") as HTMLButtonElement | null;
+const micToggle = document.getElementById("micToggle") as HTMLButtonElement | null;
+const micToggleText = micToggle?.querySelector(".btn-text") as HTMLElement | null;
+const resetClarificationButton = document.getElementById("resetClarification") as HTMLButtonElement | null;
+const axrecSection = document.getElementById("axrecSection") as HTMLElement | null;
+const humanRecPrompt = document.getElementById("humanRecPrompt") as HTMLInputElement | null;
+const humanRecStart = document.getElementById("humanRecStart") as HTMLButtonElement | null;
+const humanRecStop = document.getElementById("humanRecStop") as HTMLButtonElement | null;
+const humanRecStatus = document.getElementById("humanRecStatus") as HTMLElement | null;
+const settingsToggle = document.getElementById("settingsToggle") as HTMLButtonElement | null;
+const settingsContent = document.getElementById("settingsContent") as HTMLElement | null;
+const settingsChevron = document.getElementById("settingsChevron") as HTMLElement | null;
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 const DEBUG_RECORDING_STORAGE_KEY = "DEBUG_RECORDING";
-let pendingClarification = null;
-let clarificationHistory = [];
+let pendingClarification: ClarificationRequest | null = null;
+let clarificationHistory: ClarificationHistoryEntry[] = [];
 let awaitingClarificationResponse = false;
 let lastClarificationQuestion = "";
-let clarificationStack = [];
+let clarificationStack: ClarificationHistoryEntry[] = [];
 let debugRecordingEnabled = false;
 
 const SpeechRecognition =
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
-let recognition = null;
+let recognition: SpeechRecognition | null = null;
 let isListening = false;
 let microphonePermissionGranted = false;
 
-const isValidApiKey = (value) => API_KEY_PATTERN.test((value || "").trim());
+const isValidApiKey = (value: string): boolean => API_KEY_PATTERN.test((value || "").trim());
 
-const setApiKeyStatus = (text, tone = "missing") => {
+const setApiKeyStatus = (
+  text: string,
+  tone: "missing" | "valid" | "error" = "missing"
+): void => {
   if (!apiKeyStatus) {
     return;
   }
@@ -56,7 +99,7 @@ const setApiKeyStatus = (text, tone = "missing") => {
   apiKeyStatus.classList.add(className);
 };
 
-const persistApiKey = (value) => {
+const persistApiKey = (value: string): void => {
   if (!apiKeyField) {
     return;
   }
@@ -74,7 +117,7 @@ const persistApiKey = (value) => {
   );
 };
 
-const toggleApiKeyMask = () => {
+const toggleApiKeyMask = (): void => {
   if (!apiKeyField || !toggleApiKeyVisibility) {
     return;
   }
@@ -86,7 +129,7 @@ const toggleApiKeyMask = () => {
   toggleApiKeyVisibility.setAttribute("aria-pressed", String(!showing));
 };
 
-const updateConnectionSecurityIndicator = (state) => {
+const updateConnectionSecurityIndicator = (state?: SecurityState | null): void => {
   if (!connectionSecurityStatus) {
     return;
   }
@@ -117,11 +160,11 @@ const updateConnectionSecurityIndicator = (state) => {
   connectionSecurityStatus.setAttribute("title", tooltip);
 };
 
-function refreshConnectionSecurityIndicator() {
+function refreshConnectionSecurityIndicator(): void {
   if (!connectionSecurityStatus) {
     return;
   }
-  chrome.runtime.sendMessage({ type: "vcaa-get-security-state" }, (resp) => {
+  chrome.runtime.sendMessage({ type: "vcaa-get-security-state" }, (resp: SecurityStateResponse) => {
     if (!resp || resp.status !== "ok") {
       if (securityIcon) securityIcon.textContent = "⚠️";
       if (securityText) securityText.textContent = "Unknown";
@@ -140,7 +183,10 @@ function refreshConnectionSecurityIndicator() {
   });
 }
 
-function updateMicButtonLabel(text) {
+function updateMicButtonLabel(text: string | null = null): void {
+  if (!micToggle) {
+    return;
+  }
   if (!SpeechRecognition) {
     if (micToggleText) micToggleText.textContent = "Speech unavailable";
     micToggle.disabled = true;
@@ -159,7 +205,7 @@ function updateMicButtonLabel(text) {
   }
 }
 
-function ensureRecognition() {
+function ensureRecognition(): SpeechRecognition | null {
   if (!SpeechRecognition) {
     return null;
   }
@@ -172,7 +218,7 @@ function ensureRecognition() {
   recognition.maxAlternatives = 1;
   recognition.continuous = false;
 
-  recognition.onresult = (event) => {
+  recognition.onresult = (event: SpeechRecognitionEvent) => {
     const transcript = event.results?.[0]?.[0]?.transcript?.trim();
     if (transcript) {
       if (awaitingClarificationResponse && pendingClarification) {
@@ -185,7 +231,9 @@ function ensureRecognition() {
         runDemo(answer, answer);
         return;
       }
-      transcriptField.value = transcript;
+      if (transcriptField) {
+        transcriptField.value = transcript;
+      }
       log(`Heard: ${transcript}`);
       runDemo(transcript);
     }
@@ -195,8 +243,8 @@ function ensureRecognition() {
     awaitingClarificationResponse = false;
     updateMicButtonLabel();
   };
-  recognition.onerror = (event) => {
-    log(`Speech recognition error: ${event.error}`);
+  recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+    log(`Speech recognition error: ${event.error || "unknown"}`);
     isListening = false;
     awaitingClarificationResponse = false;
     updateMicButtonLabel();
@@ -205,7 +253,7 @@ function ensureRecognition() {
   return recognition;
 }
 
-async function requestMicrophoneAccess() {
+async function requestMicrophoneAccess(): Promise<boolean> {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     log("Microphone access is unavailable in this context.");
     return false;
@@ -219,24 +267,59 @@ async function requestMicrophoneAccess() {
     microphonePermissionGranted = true;
     return true;
   } catch (err) {
-    log(`Microphone access denied: ${err.message || err}`);
+    const message = err instanceof Error ? err.message : String(err);
+    log(`Microphone access denied: ${message}`);
     return false;
   }
 }
 
-const speakClarification = (text) => {
+const isClarificationRequest = (value: unknown): value is ClarificationRequest => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as ClarificationRequest;
+  return (
+    candidate.schema_version === "clarification_v1" ||
+    "question" in candidate ||
+    "reason" in candidate
+  );
+};
+
+const getClarificationCandidate = (value: unknown): ClarificationRequest | null => {
+  if (isClarificationRequest(value)) {
+    return value;
+  }
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const resp = value as AgentResponse;
+  if (resp.status === "needs_clarification") {
+    if (isClarificationRequest(resp.actionPlan)) {
+      return resp.actionPlan;
+    }
+    if (isClarificationRequest(resp.executionPlan)) {
+      return resp.executionPlan;
+    }
+    if (isClarificationRequest(resp)) {
+      return resp;
+    }
+  }
+  return null;
+};
+
+const speakClarification = (text: string): Promise<void> => {
   if (!text || !window.speechSynthesis) {
     return Promise.resolve();
   }
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onend = resolve;
+    utterance.onend = () => resolve();
     speechSynthesis.cancel();
     speechSynthesis.speak(utterance);
   });
 };
 
-const startClarificationListening = async () => {
+const startClarificationListening = async (): Promise<void> => {
   if (awaitingClarificationResponse) {
     return;
   }
@@ -262,13 +345,14 @@ const startClarificationListening = async () => {
       updateMicButtonLabel("Listening for clarification…");
       recognizer.start();
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       awaitingClarificationResponse = false;
-      log(`Failed to listen: ${err?.message || err}`);
+      log(`Failed to listen: ${message}`);
     }
   }
 };
 
-async function toggleListening() {
+async function toggleListening(): Promise<void> {
   if (!SpeechRecognition) {
     log("Speech recognition is not supported in this browser.");
     return;
@@ -295,22 +379,26 @@ async function toggleListening() {
     recognizer.start();
     log("Listening...");
   } catch (err) {
-    log(`Failed to start speech recognition: ${err.message || err}`);
+    const message = err instanceof Error ? err.message : String(err);
+    log(`Failed to start speech recognition: ${message}`);
     isListening = false;
     updateMicButtonLabel();
   }
 }
 
-function log(msg) {
+function log(msg: string): void {
+  if (!outputEl) {
+    return;
+  }
   outputEl.textContent = msg;
 }
 
-function formatDebugInfo(resp) {
+function formatDebugInfo(resp: DebugPayload | null | undefined): string {
   if (!resp) {
     return "No debug data.";
   }
 
-  const sections = [];
+  const sections: string[] = [];
   const actionPlan = resp.actionPlan || null;
   if (actionPlan) {
     sections.push(`Action plan:\n${JSON.stringify(actionPlan, null, 2)}`);
@@ -318,24 +406,27 @@ function formatDebugInfo(resp) {
     sections.push("Action plan:\n(none)");
   }
 
-  const steps = resp.executionPlan?.steps || [];
+  const steps: ExecutionStep[] = resp.executionPlan?.steps || [];
   if (!steps.length) {
     sections.push("Navigator interactions (AX elements):\n(none)");
     return sections.join("\n\n");
   }
 
   const axTree = resp.axTree || null;
-  const elements = Array.isArray(axTree?.elements) ? axTree.elements : [];
-  const elementsByBackendId = new Map(
-    elements.map((el) => [el.backend_node_id, el])
-  );
+  const elements: DebugAxElement[] = Array.isArray(axTree?.elements) ? axTree.elements : [];
+  const elementsByBackendId = new Map<number, DebugAxElement>();
+  elements.forEach((el: DebugAxElement) => {
+    if (typeof el.backend_node_id === "number") {
+      elementsByBackendId.set(el.backend_node_id, el);
+    }
+  });
 
-  const lines = ["Navigator interactions (AX elements):"];
+  const lines: string[] = ["Navigator interactions (AX elements):"];
   if (!axTree) {
     lines.push("axTree missing; element lookups unavailable.");
   }
 
-  steps.forEach((step, index) => {
+  steps.forEach((step: ExecutionStep, index: number) => {
     lines.push(`${index + 1}. ${step.action_type} (step_id=${step.step_id})`);
     lines.push(`   backend_node_id: ${step.backend_node_id ?? "n/a"}`);
     if (step.value != null && step.value !== "") {
@@ -348,7 +439,8 @@ function formatDebugInfo(resp) {
       lines.push(`   confidence: ${step.confidence}`);
     }
 
-    const el = elementsByBackendId.get(step.backend_node_id);
+    const backendId = step.backend_node_id ?? -1;
+    const el = elementsByBackendId.get(backendId);
     if (!el) {
       lines.push("   element: not found in axTree");
       return;
@@ -376,15 +468,15 @@ function formatDebugInfo(resp) {
   return sections.join("\n\n");
 }
 
-function renderDebugInfo(resp) {
+function renderDebugInfo(resp: DebugPayload | null | undefined): void {
   if (!debugOutputEl) {
     return;
   }
   debugOutputEl.textContent = formatDebugInfo(resp);
 }
 
-function refreshDebugFromStorage() {
-  chrome.runtime.sendMessage({ type: "vcaa-get-last-debug" }, (resp) => {
+function refreshDebugFromStorage(): void {
+  chrome.runtime.sendMessage({ type: "vcaa-get-last-debug" }, (resp: { status?: string; payload?: DebugPayload }) => {
     if (resp?.status !== "ok" || !resp.payload) {
       return;
     }
@@ -392,7 +484,7 @@ function refreshDebugFromStorage() {
   });
 }
 
-function applyRunDemoResponse(resp) {
+function applyRunDemoResponse(resp: RunDemoResponse | null | undefined): void {
   log(formatResponse(resp));
   renderDebugInfo(resp);
   if (!resp?.executionPlan?.steps?.length) {
@@ -407,7 +499,7 @@ function applyRunDemoResponse(resp) {
     return;
   }
   if (resp.status === "needs_clarification") {
-    renderClarification(resp.actionPlan || resp.executionPlan || resp);
+    renderClarification(getClarificationCandidate(resp));
     console.log("Status: Awaiting clarification");
     return;
   }
@@ -415,7 +507,7 @@ function applyRunDemoResponse(resp) {
   console.log("Status: Completed successfully");
 }
 
-async function copyDebugOutput() {
+async function copyDebugOutput(): Promise<void> {
   if (!debugOutputEl) {
     return;
   }
@@ -445,17 +537,17 @@ async function copyDebugOutput() {
   }
 }
 
-const renderPopupClarificationHistory = () => {
+const renderPopupClarificationHistory = (): void => {
   if (!clarificationHistoryContainer) {
     return;
   }
   clarificationHistoryContainer.innerHTML = "";
-  clarificationHistory.forEach((entry) => {
+  clarificationHistory.forEach((entry: ClarificationHistoryEntry) => {
     const row = document.createElement("div");
     row.className = "clarification-history-row";
     const question = document.createElement("p");
     question.className = "clarification-history-question";
-    question.textContent = entry.question;
+    question.textContent = entry.question || "Clarification asked";
     const answer = document.createElement("p");
     answer.className = "clarification-history-answer";
     answer.textContent = entry.answer;
@@ -473,7 +565,7 @@ const renderPopupClarificationHistory = () => {
   }
 };
 
-const addPopupClarificationHistoryEntry = (question, answer) => {
+const addPopupClarificationHistoryEntry = (question: string, answer: string): void => {
   clarificationHistory.unshift({ question, answer });
   if (clarificationHistory.length > 5) {
     clarificationHistory = clarificationHistory.slice(0, 5);
@@ -484,26 +576,27 @@ const addPopupClarificationHistoryEntry = (question, answer) => {
   }
 };
 
-const clearPopupClarificationHistory = () => {
+const clearPopupClarificationHistory = (): void => {
   clarificationHistory = [];
   renderPopupClarificationHistory();
   clarificationStack = [];
 };
 
-function formatClarification(plan) {
+function formatClarification(plan: ClarificationRequest | null | undefined): string {
   if (!plan) {
     return "Needs clarification, but no plan was provided.";
   }
-  const lines = [];
+  const lines: string[] = [];
   if (plan.question) {
     lines.push(`Question: ${plan.question}`);
   } else {
     lines.push("Question: clarification requested.");
   }
 
-  if (plan.options?.length) {
+  const options = (plan as ClarificationPlan | null)?.options;
+  if (options?.length) {
     lines.push("Options:");
-    plan.options.forEach((option, idx) => {
+    options.forEach((option, idx: number) => {
       const candidateInfo = option.candidate_element_ids?.length
         ? ` (elements: ${option.candidate_element_ids.join(", ")})`
         : "";
@@ -517,7 +610,9 @@ function formatClarification(plan) {
   return lines.join("\n");
 }
 
-const renderClarification = async (clarification) => {
+const renderClarification = async (
+  clarification: ClarificationRequest | null
+): Promise<void> => {
   pendingClarification = clarification;
   if (!clarificationPanel) {
     return;
@@ -546,7 +641,7 @@ const renderClarification = async (clarification) => {
   startClarificationListening();
 };
 
-const clearClarificationPanel = () => {
+const clearClarificationPanel = (): void => {
   pendingClarification = null;
   awaitingClarificationResponse = false;
   if (!clarificationPanel) {
@@ -558,7 +653,7 @@ const clearClarificationPanel = () => {
   lastClarificationQuestion = "";
 };
 
-function formatResponse(resp) {
+function formatResponse(resp: RunDemoResponse | null | undefined): string {
   if (!resp) {
     return "No response received.";
   }
@@ -568,8 +663,7 @@ function formatResponse(resp) {
   }
 
   if (resp.status === "needs_clarification") {
-    const plan = resp.actionPlan || resp.executionPlan;
-    return formatClarification(plan);
+    return formatClarification(getClarificationCandidate(resp));
   }
 
   if (resp.status === "navigating") {
@@ -580,14 +674,19 @@ function formatResponse(resp) {
     // Fast path response - instant command execution
     if (resp.fastPath && resp.action) {
       const actionType = resp.action.type;
-      const detail = resp.action.direction || resp.action.position || "";
+      const detail =
+        actionType === "scroll"
+          ? resp.action.direction
+          : actionType === "scroll_to"
+          ? resp.action.position
+          : "";
       const duration = resp.execResult?.duration_ms || 0;
       const actionLabel = detail ? `${actionType} ${detail}` : actionType;
       return `Instant: ${actionLabel} (${duration}ms)`;
     }
 
     // Full pipeline response
-    const lines = [];
+    const lines: string[] = [];
     if (resp.actionPlan) {
       const action = resp.actionPlan.action || "unknown action";
       const target = resp.actionPlan.target || "unknown target";
@@ -595,7 +694,7 @@ function formatResponse(resp) {
     }
     if (resp.executionPlan?.steps?.length) {
       lines.push("Execution steps:");
-      resp.executionPlan.steps.forEach((step) => {
+      resp.executionPlan.steps.forEach((step: ExecutionStep) => {
         const valuePart = step.value ? ` = "${step.value}"` : "";
         lines.push(
           `  • ${step.action_type} ${step.element_id || "(unknown element)"}${valuePart}`
@@ -611,7 +710,7 @@ function formatResponse(resp) {
   return JSON.stringify(resp, null, 2);
 }
 
-function updateHumanRecordingStatus(state) {
+function updateHumanRecordingStatus(state: HumanRecordingStatus): void {
   if (!humanRecStatus) {
     return;
   }
@@ -626,12 +725,12 @@ function updateHumanRecordingStatus(state) {
   }
 }
 
-function refreshHumanRecordingStatus() {
+function refreshHumanRecordingStatus(): void {
   if (!debugRecordingEnabled) {
     updateHumanRecordingStatus({ active: false, enrolled_tabs: [] });
     return;
   }
-  chrome.runtime.sendMessage({ type: "vw-human-rec-status" }, (resp) => {
+  chrome.runtime.sendMessage({ type: "vw-human-rec-status" }, (resp: HumanRecordingStatus) => {
     if (!resp || resp.status !== "ok") {
       updateHumanRecordingStatus({ active: false, enrolled_tabs: [] });
       return;
@@ -640,8 +739,8 @@ function refreshHumanRecordingStatus() {
   });
 }
 
-function refreshDebugRecordingFlag() {
-  chrome.storage.sync.get([DEBUG_RECORDING_STORAGE_KEY], (result) => {
+function refreshDebugRecordingFlag(): void {
+  chrome.storage.sync.get([DEBUG_RECORDING_STORAGE_KEY], (result: Record<string, unknown>) => {
     const raw = result[DEBUG_RECORDING_STORAGE_KEY];
     debugRecordingEnabled = String(raw || "").trim() === "1";
     if (axrecSection) {
@@ -651,12 +750,16 @@ function refreshDebugRecordingFlag() {
   });
 }
 
-function loadConfig() {
-  chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps"], (result) => {
-    if (result.vcaaApiBase) {
-      apiBaseField.value = result.vcaaApiBase;
-    } else {
-      apiBaseField.value = "http://localhost:8081";
+function loadConfig(): void {
+  chrome.storage.sync.get(
+    ["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps"],
+    (result: { vcaaApiBase?: string; vcaaApiKey?: string; vcaaRequireHttps?: boolean }) => {
+    if (apiBaseField) {
+      if (result.vcaaApiBase) {
+        apiBaseField.value = result.vcaaApiBase;
+      } else {
+        apiBaseField.value = "http://localhost:8081";
+      }
     }
     if (apiKeyField) {
       apiKeyField.value = result.vcaaApiKey || "";
@@ -674,10 +777,11 @@ function loadConfig() {
       useAccessibilityTreeToggle.disabled = true;
     }
     refreshConnectionSecurityIndicator();
-  });
+    }
+  );
 }
 
-function persistApiBaseField(callback) {
+function persistApiBaseField(callback?: () => void): void {
   if (!apiBaseField) {
     if (typeof callback === "function") {
       callback();
@@ -693,16 +797,16 @@ function persistApiBaseField(callback) {
   });
 }
 
-function handleRequireHttpsToggle(event) {
-  const enforced = Boolean(event?.target?.checked);
+function handleRequireHttpsToggle(event: Event) {
+  const target = event?.target as HTMLInputElement | null;
+  const enforced = Boolean(target?.checked);
   chrome.storage.sync.set({ vcaaRequireHttps: enforced }, () => {
     refreshConnectionSecurityIndicator();
   });
 }
 
-
-function runDemo(transcriptInput, clarificationResponse = null) {
-  const transcript = (transcriptInput || transcriptField.value).trim();
+function runDemo(transcriptInput: string = "", clarificationResponse: string | null = null): void {
+  const transcript = (transcriptInput || transcriptField?.value || "").trim();
   if (!transcript) {
     log("Please provide a transcript before running the demo.");
     return;
@@ -722,22 +826,27 @@ function runDemo(transcriptInput, clarificationResponse = null) {
       clarificationResponse,
       clarificationHistory: clarificationStack,
     },
-    (resp) => {
+    (resp: RunDemoResponse) => {
       applyRunDemoResponse(resp);
     }
   );
 }
 
-runButton.addEventListener("click", () => {
-  runDemo();
-});
+if (runButton) {
+  runButton.addEventListener("click", () => {
+    runDemo();
+  });
+}
 
 if (micToggle) {
   micToggle.addEventListener("click", toggleListening);
 }
 
 if (apiKeyField) {
-  apiKeyField.addEventListener("input", (event) => persistApiKey(event.target.value || ""));
+  apiKeyField.addEventListener("input", (event: Event) => {
+    const target = event.target as HTMLInputElement | null;
+    persistApiKey(target?.value || "");
+  });
 }
 
 if (toggleApiKeyVisibility) {
@@ -769,13 +878,17 @@ if (humanRecStart) {
       log("Please provide an example prompt before starting a recording.");
       return;
     }
-    chrome.runtime.sendMessage({ type: "vw-human-rec-start", prompt_text: promptText }, (resp) => {
-      if (!resp || resp.status !== "ok") {
+    chrome.runtime.sendMessage(
+      { type: "vw-human-rec-start", prompt_text: promptText },
+      (resp: HumanRecordingStatus) => {
+        const response = resp;
+      if (!response || response.status !== "ok") {
         log(resp?.error || "Failed to start human AX recording.");
         return;
       }
-      updateHumanRecordingStatus(resp);
-    });
+      updateHumanRecordingStatus(response);
+      }
+    );
   });
 }
 
@@ -785,8 +898,9 @@ if (humanRecStop) {
       log("DEBUG_RECORDING is not enabled.");
       return;
     }
-    chrome.runtime.sendMessage({ type: "vw-human-rec-stop" }, (resp) => {
-      if (!resp || resp.status !== "ok") {
+    chrome.runtime.sendMessage({ type: "vw-human-rec-stop" }, (resp: HumanRecordingStatus) => {
+      const response = resp;
+      if (!response || response.status !== "ok") {
         log(resp?.error || "Failed to stop human AX recording.");
         return;
       }
@@ -821,7 +935,7 @@ if (settingsToggle && settingsContent && settingsChevron) {
   });
 }
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
+chrome.storage.onChanged.addListener((changes: ChromeStorageChanges, areaName: string) => {
   if (areaName !== "sync") {
     return;
   }
@@ -831,8 +945,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   refreshDebugRecordingFlag();
 });
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message: { type?: string; payload?: RunDemoResponse }) => {
   if (message?.type === "vcaa-run-demo-update" && message.payload) {
     applyRunDemoResponse(message.payload);
   }
 });
+})();

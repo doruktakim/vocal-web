@@ -1,12 +1,12 @@
 (() => {
-  const globalScope =
+  const globalScope: typeof globalThis =
     typeof globalThis !== "undefined"
       ? globalThis
       : typeof window !== "undefined"
       ? window
       : typeof self !== "undefined"
       ? self
-      : {};
+      : ({} as typeof globalThis);
 
   const ALLOWED_PROTOCOLS = ["http:", "https:"];
   const KNOWN_SAFE_DOMAINS = [
@@ -20,7 +20,7 @@
     "airbnb.com",
   ];
 
-  const resolveBaseUrl = (explicitBase) => {
+  const resolveBaseUrl = (explicitBase?: string) => {
     if (explicitBase) {
       return explicitBase;
     }
@@ -33,7 +33,7 @@
     return "https://example.com";
   };
 
-  const extractRootDomain = (hostname) => {
+  const extractRootDomain = (hostname: string): string => {
     if (!hostname || typeof hostname !== "string") {
       return "";
     }
@@ -52,19 +52,23 @@
     return parts.slice(-2).join(".");
   };
 
-  const isValidNavigationUrl = (input, options = {}) => {
+  const isValidNavigationUrl = (
+    input: string,
+    options: NavigationValidationOptions = {}
+  ): NavigationValidationResult => {
     const { allowUnknownDomains = true, allowedDomains, baseUrl } = options || {};
     if (!input || typeof input !== "string") {
       return { valid: false, reason: "missing_url", message: "Navigation URL is empty." };
     }
-    let parsed;
+    let parsed: URL;
     try {
       parsed = new URL(input, resolveBaseUrl(baseUrl));
     } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to parse URL.";
       return {
         valid: false,
         reason: "malformed_url",
-        message: err?.message || "Failed to parse URL.",
+        message,
       };
     }
     if (!ALLOWED_PROTOCOLS.includes(parsed.protocol)) {
@@ -101,7 +105,7 @@
     };
   };
 
-  const api = {
+  const api: VocalWebSecurity = {
     ALLOWED_PROTOCOLS,
     KNOWN_SAFE_DOMAINS,
     extractRootDomain,
@@ -115,4 +119,3 @@
     Object.assign(namespace, api);
   }
 })();
-

@@ -1,39 +1,46 @@
-const micButton = document.getElementById("micButton");
-const runButton = document.getElementById("runButton");
-const status = document.getElementById("status");
-const output = document.getElementById("output");
-const promptInput = document.getElementById("promptInput");
-const apiBaseInput = document.getElementById("apiBase");
-const apiKeyInput = document.getElementById("apiKey");
-const apiKeyStatus = document.getElementById("apiKeyStatus");
-const toggleApiKeyVisibility = document.getElementById("toggleApiKeyVisibility");
-const clarificationPanel = document.getElementById("clarificationPanel");
-const clarificationHistoryContainer = document.getElementById("clarificationHistory");
-const resetClarificationButton = document.getElementById("resetClarification");
+(() => {
+type GlobalWithChrome = typeof globalThis & { chrome?: typeof chrome };
+type InterpreterResponse = AgentResponse | ActionPlan | ClarificationRequest;
+
+const micButton = document.getElementById("micButton") as HTMLButtonElement | null;
+const runButton = document.getElementById("runButton") as HTMLButtonElement | null;
+const statusEl = document.getElementById("status") as HTMLElement | null;
+const output = document.getElementById("output") as HTMLElement | null;
+const promptInput = document.getElementById("promptInput") as HTMLTextAreaElement | null;
+const apiBaseInput = document.getElementById("apiBase") as HTMLInputElement | null;
+const apiKeyInput = document.getElementById("apiKey") as HTMLInputElement | null;
+const apiKeyStatus = document.getElementById("apiKeyStatus") as HTMLElement | null;
+const toggleApiKeyVisibility = document.getElementById("toggleApiKeyVisibility") as HTMLElement | null;
+const clarificationPanel = document.getElementById("clarificationPanel") as HTMLElement | null;
+const clarificationHistoryContainer = document.getElementById("clarificationHistory") as HTMLElement | null;
+const resetClarificationButton = document.getElementById("resetClarification") as HTMLButtonElement | null;
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
-const securityUtils = window.VocalWebSecurity || {};
+const securityUtils = window.VocalWebSecurity;
 const validateNavigationUrl =
-  typeof securityUtils.isValidNavigationUrl === "function"
-    ? securityUtils.isValidNavigationUrl
+  typeof securityUtils?.isValidNavigationUrl === "function"
+    ? securityUtils.isValidNavigationUrl.bind(securityUtils)
     : null;
 
 const SpeechRecognition =
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
-let recognition = null;
+let recognition: SpeechRecognition | null = null;
 let isListening = false;
 let microphonePermissionGranted = false;
-let clarificationHistory = [];
+let clarificationHistory: ClarificationHistoryEntry[] = [];
 let awaitingClarificationResponse = false;
-let pendingClarification = null;
+let pendingClarification: ClarificationRequest | null = null;
 let lastClarificationQuestion = "";
-let clarificationStack = [];
+let clarificationStack: ClarificationHistoryEntry[] = [];
 
 const isExtensionContext =
-  typeof globalThis.chrome?.runtime?.sendMessage === "function";
+  typeof (globalThis as GlobalWithChrome).chrome?.runtime?.sendMessage === "function";
 
-const isValidApiKey = (value) => API_KEY_PATTERN.test((value || "").trim());
+const isValidApiKey = (value: string) => API_KEY_PATTERN.test((value || "").trim());
 
-const setApiKeyStatus = (text, tone = "missing") => {
+const setApiKeyStatus = (
+  text: string,
+  tone: "missing" | "valid" | "error" = "missing"
+): void => {
   if (!apiKeyStatus) {
     return;
   }
@@ -44,7 +51,7 @@ const setApiKeyStatus = (text, tone = "missing") => {
   apiKeyStatus.classList.add(className);
 };
 
-const persistApiKey = (value) => {
+const persistApiKey = (value: string): void => {
   if (!apiKeyInput) {
     return;
   }
@@ -70,7 +77,7 @@ const persistApiKey = (value) => {
   }
 };
 
-const toggleApiKeyMask = () => {
+const toggleApiKeyMask = (): void => {
   if (!apiKeyInput || !toggleApiKeyVisibility) {
     return;
   }
@@ -80,12 +87,12 @@ const toggleApiKeyMask = () => {
   toggleApiKeyVisibility.setAttribute("aria-pressed", String(!showing));
 };
 
-const getActiveApiKey = () => (apiKeyInput?.value || "").trim();
+const getActiveApiKey = (): string => (apiKeyInput?.value || "").trim();
 
-const uuid = () =>
+const uuid = (): string =>
   window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-const normalizeApiBase = (value) => {
+const normalizeApiBase = (value: string): string => {
   if (!value) {
     return "http://localhost:8081";
   }
@@ -96,23 +103,67 @@ const normalizeApiBase = (value) => {
   return `http://${trimmed.replace(/\/$/, "")}`;
 };
 
-const logStatus = (msg) => {
-  status.textContent = msg;
+const logStatus = (msg: string): void => {
+  if (!statusEl) {
+    return;
+  }
+  statusEl.textContent = msg;
 };
 
-const speakClarification = (text) => {
+const isClarificationRequest = (value: unknown): value is ClarificationRequest => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as ClarificationRequest;
+  return (
+    candidate.schema_version === "clarification_v1" ||
+    "question" in candidate ||
+    "reason" in candidate
+  );
+};
+
+const getClarificationCandidate = (value: unknown): ClarificationRequest | null => {
+  if (isClarificationRequest(value)) {
+    return value;
+  }
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const resp = value as AgentResponse;
+  if (resp.status === "needs_clarification") {
+    if (isClarificationRequest(resp.actionPlan)) {
+      return resp.actionPlan;
+    }
+    if (isClarificationRequest(resp.executionPlan)) {
+      return resp.executionPlan;
+    }
+    if (isClarificationRequest(resp)) {
+      return resp;
+    }
+  }
+  return null;
+};
+
+const isActionPlan = (value: unknown): value is ActionPlan => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  return "action" in value || "target" in value || "entities" in value || "value" in value;
+};
+
+const speakClarification = (text: string): Promise<void> => {
   if (!text || !window.speechSynthesis) {
     return Promise.resolve();
   }
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onend = resolve;
+    utterance.onend = () => resolve();
     speechSynthesis.cancel();
     speechSynthesis.speak(utterance);
   });
 };
 
-const startClarificationListening = async () => {
+const startClarificationListening = async (): Promise<void> => {
   if (awaitingClarificationResponse) {
     return;
   }
@@ -137,18 +188,19 @@ const startClarificationListening = async () => {
       updateMicButtonLabel("Listening for clarification…");
       recognizer.start();
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       awaitingClarificationResponse = false;
-      logStatus(`Failed to listen: ${err?.message || err}`);
+      logStatus(`Failed to listen: ${message}`);
     }
   }
 };
 
-const renderClarificationHistory = () => {
+const renderClarificationHistory = (): void => {
   if (!clarificationHistoryContainer) {
     return;
   }
   clarificationHistoryContainer.innerHTML = "";
-  clarificationHistory.forEach((entry) => {
+  clarificationHistory.forEach((entry: ClarificationHistoryEntry) => {
     const row = document.createElement("div");
     row.className = "clarification-history-row";
     const question = document.createElement("p");
@@ -163,7 +215,7 @@ const renderClarificationHistory = () => {
   });
 };
 
-const addClarificationHistoryEntry = (question, answer) => {
+const addClarificationHistoryEntry = (question: string, answer: string): void => {
   clarificationHistory.unshift({ question, answer });
   if (clarificationHistory.length > 5) {
     clarificationHistory = clarificationHistory.slice(0, 5);
@@ -174,14 +226,14 @@ const addClarificationHistoryEntry = (question, answer) => {
   }
 };
 
-const clearClarificationHistory = () => {
+const clearClarificationHistory = (): void => {
   clarificationHistory = [];
   renderClarificationHistory();
   clarificationStack = [];
 };
 
-const formatClarification = (clarification) => {
-  const lines = [];
+const formatClarification = (clarification?: ClarificationRequest | null): string => {
+  const lines: string[] = [];
   if (!clarification) {
     return "Clarification required.";
   }
@@ -192,7 +244,9 @@ const formatClarification = (clarification) => {
   return lines.join("\n");
 };
 
-const renderClarification = async (clarification) => {
+const renderClarification = async (
+  clarification: ClarificationRequest | null
+): Promise<void> => {
   pendingClarification = clarification;
   if (!clarificationPanel) {
     return;
@@ -218,7 +272,7 @@ const renderClarification = async (clarification) => {
   startClarificationListening();
 };
 
-const clearClarification = () => {
+const clearClarification = (): void => {
   pendingClarification = null;
   awaitingClarificationResponse = false;
   if (clarificationPanel) {
@@ -227,7 +281,8 @@ const clearClarification = () => {
   }
   lastClarificationQuestion = "";
 };
-const formatResponseOutput = (resp) => {
+
+const formatResponseOutput = (resp?: AgentResponse | null): string => {
   if (!resp) {
     return "No response received.";
   }
@@ -235,15 +290,15 @@ const formatResponseOutput = (resp) => {
     return resp.error || "An unknown error occurred.";
   }
   if (resp.status === "needs_clarification") {
-    return formatClarification(resp.actionPlan || resp.executionPlan || resp);
+    return formatClarification(getClarificationCandidate(resp));
   }
-  const lines = [];
+  const lines: string[] = [];
   if (resp.actionPlan) {
     lines.push(`Action plan: ${resp.actionPlan.action} → ${resp.actionPlan.target}`);
   }
   if (resp.executionPlan?.steps?.length) {
     lines.push("Execution steps:");
-    resp.executionPlan.steps.forEach((step) => {
+    resp.executionPlan.steps.forEach((step: ExecutionStep) => {
       const valuePart = step.value ? ` = "${step.value}"` : "";
       lines.push(
         `  • ${step.action_type} ${step.element_id || "(unknown element)"}${valuePart}`
@@ -256,13 +311,19 @@ const formatResponseOutput = (resp) => {
   return lines.join("\n") || "Completed with no additional details.";
 };
 
-const updateMicButtonLabel = (override) => {
+const updateMicButtonLabel = (override: string | null = null): void => {
+  if (!micButton) {
+    return;
+  }
   if (!SpeechRecognition) {
     micButton.textContent = "🎙️ Speech unavailable";
     micButton.disabled = true;
     return;
   }
-  const label = micButton.querySelector(".mic-text");
+  const label = micButton.querySelector(".mic-text") as HTMLElement | null;
+  if (!label) {
+    return;
+  }
   if (override) {
     label.textContent = override;
     return;
@@ -270,7 +331,7 @@ const updateMicButtonLabel = (override) => {
   label.textContent = isListening ? "Listening… speak clearly" : "Tap to speak";
 };
 
-const ensureRecognition = () => {
+const ensureRecognition = (): SpeechRecognition | null => {
   if (!SpeechRecognition) {
     return null;
   }
@@ -283,7 +344,7 @@ const ensureRecognition = () => {
   recognition.maxAlternatives = 1;
   recognition.continuous = false;
 
-  recognition.onresult = (event) => {
+  recognition.onresult = (event: SpeechRecognitionEvent) => {
     const transcript = event.results?.[0]?.[0]?.transcript?.trim();
     if (transcript) {
       if (awaitingClarificationResponse && pendingClarification) {
@@ -291,8 +352,12 @@ const ensureRecognition = () => {
         submitPrompt(transcript, true, transcript);
         return;
       }
-      promptInput.value = transcript;
-      output.textContent = `Heard: ${transcript}`;
+      if (promptInput) {
+        promptInput.value = transcript;
+      }
+      if (output) {
+        output.textContent = `Heard: ${transcript}`;
+      }
       logStatus("Prompt updated from speech.");
       submitPrompt(transcript, true);
     }
@@ -305,10 +370,12 @@ const ensureRecognition = () => {
     awaitingClarificationResponse = false;
   };
 
-  recognition.onerror = (event) => {
+  recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
     isListening = false;
     updateMicButtonLabel();
-    output.textContent = `Speech recognition error: ${event.error || "unknown"}`;
+    if (output) {
+      output.textContent = `Speech recognition error: ${event.error || "unknown"}`;
+    }
     logStatus("Speech recognition failed.");
     awaitingClarificationResponse = false;
   };
@@ -316,9 +383,11 @@ const ensureRecognition = () => {
   return recognition;
 };
 
-const requestMicrophoneAccess = async () => {
+const requestMicrophoneAccess = async (): Promise<boolean> => {
   if (!navigator.mediaDevices?.getUserMedia) {
-    output.textContent = "Microphone APIs are not supported in this browser.";
+    if (output) {
+      output.textContent = "Microphone APIs are not supported in this browser.";
+    }
     return false;
   }
   if (microphonePermissionGranted) {
@@ -330,19 +399,26 @@ const requestMicrophoneAccess = async () => {
     microphonePermissionGranted = true;
     return true;
   } catch (err) {
-    output.textContent = `Microphone access denied: ${err.message || err}`;
+    const message = err instanceof Error ? err.message : String(err);
+    if (output) {
+      output.textContent = `Microphone access denied: ${message}`;
+    }
     return false;
   }
 };
 
-const toggleListening = async () => {
+const toggleListening = async (): Promise<void> => {
   if (!SpeechRecognition) {
-    output.textContent = "Speech recognition is not available.";
+    if (output) {
+      output.textContent = "Speech recognition is not available.";
+    }
     return;
   }
   const recognizer = ensureRecognition();
   if (!recognizer) {
-    output.textContent = "Unable to initialize speech recognition.";
+    if (output) {
+      output.textContent = "Unable to initialize speech recognition.";
+    }
     return;
   }
   if (isListening) {
@@ -360,20 +436,30 @@ const toggleListening = async () => {
     isListening = true;
     updateMicButtonLabel();
     logStatus("Microphone active. Speak now.");
-    output.textContent = "Listening for speech…";
+    if (output) {
+      output.textContent = "Listening for speech…";
+    }
     recognizer.start();
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     isListening = false;
     updateMicButtonLabel();
-    output.textContent = `Failed to start speech recognition: ${err?.message || err}`;
+    if (output) {
+      output.textContent = `Failed to start speech recognition: ${message}`;
+    }
     logStatus("Ready for your command.");
   }
 };
 
-micButton.addEventListener("click", toggleListening);
+if (micButton) {
+  micButton.addEventListener("click", toggleListening);
+}
 updateMicButtonLabel();
 
-const requestActionPlan = async (prompt, apiBase) => {
+const requestActionPlan = async (
+  prompt: string,
+  apiBase: string
+): Promise<InterpreterResponse> => {
   const base = normalizeApiBase(apiBase);
   const endpoint = `${base}/api/interpreter/actionplan`;
   const apiKey = getActiveApiKey();
@@ -401,8 +487,12 @@ const requestActionPlan = async (prompt, apiBase) => {
   return resp.json();
 };
 
-const callExtensionRunDemo = async (transcript, clarificationResponse, clarificationHistory) =>
-  new Promise((resolve, reject) => {
+const callExtensionRunDemo = async (
+  transcript: string,
+  clarificationResponse: string | null,
+  clarificationHistory: ClarificationHistoryEntry[]
+): Promise<AgentResponse> =>
+  new Promise<AgentResponse>((resolve, reject) => {
     if (!isExtensionContext) {
       reject(new Error("Extension runtime unavailable"));
       return;
@@ -414,8 +504,8 @@ const callExtensionRunDemo = async (transcript, clarificationResponse, clarifica
         clarificationResponse,
         clarificationHistory,
       },
-      (resp) => {
-        if (chrome.runtime.lastError) {
+      (resp: AgentResponse) => {
+        if (chrome.runtime.lastError?.message) {
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
@@ -424,7 +514,7 @@ const callExtensionRunDemo = async (transcript, clarificationResponse, clarifica
     );
   });
 
-const handleRedirect = (plan) => {
+const handleRedirect = (plan: ActionPlan | null | undefined): boolean => {
   if (!plan || plan.action !== "open_site") {
     return false;
   }
@@ -438,28 +528,40 @@ const handleRedirect = (plan) => {
     if (!validation?.valid) {
       const errorMessage = validation?.message || "Navigation blocked by security policy.";
       logStatus(errorMessage);
-      output.textContent += `\n${errorMessage}`;
+      if (output) {
+        output.textContent += `\n${errorMessage}`;
+      }
       return false;
     }
     targetUrl = validation.url || url;
   }
   logStatus(`Redirecting to ${targetUrl}…`);
-  output.textContent += `\nRedirecting to ${targetUrl}…`;
+  if (output) {
+    output.textContent += `\nRedirecting to ${targetUrl}…`;
+  }
   window.location.href = targetUrl;
   return true;
 };
 
-const submitPrompt = async (prompt, autoTriggered = false, clarificationResponse = null) => {
+const submitPrompt = async (
+  prompt: string,
+  autoTriggered = false,
+  clarificationResponse: string | null = null
+): Promise<void> => {
   const trimmed = prompt.trim();
   if (!trimmed) {
     logStatus("Please enter or dictate a prompt first.");
-    output.textContent = "No prompt provided.";
+    if (output) {
+      output.textContent = "No prompt provided.";
+    }
     return;
   }
   const apiKeyValue = getActiveApiKey();
   if (!isValidApiKey(apiKeyValue)) {
     logStatus("Please configure a valid API key before running the demo.");
-    output.textContent = "API key missing or invalid.";
+    if (output) {
+      output.textContent = "API key missing or invalid.";
+    }
     return;
   }
   if (!clarificationResponse) {
@@ -469,31 +571,34 @@ const submitPrompt = async (prompt, autoTriggered = false, clarificationResponse
     lastClarificationQuestion = "";
   }
   logStatus("Sending prompt to VCAA agents…");
-  output.textContent = `Prompt queued: "${trimmed}"`;
-  runButton.disabled = true;
+  if (output) {
+    output.textContent = `Prompt queued: "${trimmed}"`;
+  }
+  if (runButton) {
+    runButton.disabled = true;
+  }
   try {
-    let response;
+    let response: InterpreterResponse | null = null;
     if (isExtensionContext) {
       response = await callExtensionRunDemo(
         trimmed,
         clarificationResponse,
         clarificationStack
       );
-      output.textContent = formatResponseOutput(response);
+      if (output) {
+        output.textContent = formatResponseOutput(response);
+      }
     } else {
-      const actionPlan = await requestActionPlan(trimmed, apiBaseInput.value);
-      output.textContent = JSON.stringify(actionPlan, null, 2);
-      if (handleRedirect(actionPlan)) {
+      const actionPlan = await requestActionPlan(trimmed, apiBaseInput?.value || "");
+      if (output) {
+        output.textContent = JSON.stringify(actionPlan, null, 2);
+      }
+      if (isActionPlan(actionPlan) && handleRedirect(actionPlan)) {
         return;
       }
       response = actionPlan;
     }
-    const clarificationCandidate =
-      response?.status === "needs_clarification"
-        ? response.actionPlan || response.executionPlan || response
-        : response?.schema_version === "clarification_v1"
-        ? response
-        : null;
+    const clarificationCandidate = getClarificationCandidate(response);
     if (clarificationCandidate) {
       renderClarification(clarificationCandidate);
     } else {
@@ -507,35 +612,47 @@ const submitPrompt = async (prompt, autoTriggered = false, clarificationResponse
         : "Interpreter request completed."
     );
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     logStatus("Unable to reach the local bridge.");
-    output.textContent = `Error: ${err.message}`;
+    if (output) {
+      output.textContent = `Error: ${message}`;
+    }
   } finally {
-    runButton.disabled = false;
+    if (runButton) {
+      runButton.disabled = false;
+    }
   }
   if (autoTriggered) {
-    micButton.focus();
+    micButton?.focus();
   }
 };
 
-runButton.addEventListener("click", () => submitPrompt(promptInput.value));
+if (runButton && promptInput) {
+  runButton.addEventListener("click", () => submitPrompt(promptInput.value));
+}
 
-const loadConfig = () => {
+const loadConfig = (): void => {
   if (isExtensionContext) {
-    chrome.storage.sync.get(["vcaaApiBase", "vcaaApiKey"], (result) => {
-      if (result.vcaaApiBase) {
-        apiBaseInput.value = result.vcaaApiBase;
-      }
-      if (apiKeyInput) {
-        apiKeyInput.value = result.vcaaApiKey || "";
-        if (result.vcaaApiKey) {
-          setApiKeyStatus("API key saved", "valid");
-        } else {
-          setApiKeyStatus("API key not set", "missing");
+    chrome.storage.sync.get(
+      ["vcaaApiBase", "vcaaApiKey"],
+      (result: { vcaaApiBase?: string; vcaaApiKey?: string }) => {
+        if (result.vcaaApiBase && apiBaseInput) {
+          apiBaseInput.value = result.vcaaApiBase;
+        }
+        if (apiKeyInput) {
+          apiKeyInput.value = result.vcaaApiKey || "";
+          if (result.vcaaApiKey) {
+            setApiKeyStatus("API key saved", "valid");
+          } else {
+            setApiKeyStatus("API key not set", "missing");
+          }
         }
       }
-    });
+    );
   } else {
-    apiBaseInput.value = "http://localhost:8081";
+    if (apiBaseInput) {
+      apiBaseInput.value = "http://localhost:8081";
+    }
     if (apiKeyInput) {
       apiKeyInput.value = "";
       setApiKeyStatus("API key not set", "missing");
@@ -545,17 +662,17 @@ const loadConfig = () => {
 
 loadConfig();
 
-if (isExtensionContext) {
+if (isExtensionContext && apiBaseInput) {
   apiBaseInput.addEventListener("change", () => {
-    chrome.runtime.sendMessage(
-      { type: "vcaa-set-api", apiBase: apiBaseInput.value },
-      () => {}
-    );
+    chrome.runtime.sendMessage({ type: "vcaa-set-api", apiBase: apiBaseInput.value }, () => {});
   });
 }
 
 if (apiKeyInput) {
-  apiKeyInput.addEventListener("input", (event) => persistApiKey(event.target.value || ""));
+  apiKeyInput.addEventListener("input", (event: Event) => {
+    const target = event.target as HTMLInputElement | null;
+    persistApiKey(target?.value || "");
+  });
 }
 
 if (toggleApiKeyVisibility) {
@@ -571,3 +688,4 @@ if (resetClarificationButton) {
 }
 
 renderClarificationHistory();
+})();

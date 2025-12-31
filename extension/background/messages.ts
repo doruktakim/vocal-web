@@ -2,11 +2,28 @@
 // Message Handlers
 // ============================================================================
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+type RuntimeMessage = {
+  type?: string;
+  transcript?: string;
+  clarificationResponse?: string | null;
+  clarificationHistory?: ClarificationHistoryEntry[];
+  prompt_text?: string;
+  apiBase?: string;
+  traceId?: string;
+  step?: ExecutionStep;
+  payload?: unknown;
+};
+
+type RuntimeMessageSender = { tab?: ChromeTabInfo };
+
+type RuntimeResponse = Record<string, unknown>;
+
+chrome.runtime.onMessage.addListener(
+  (message: RuntimeMessage, sender: RuntimeMessageSender, sendResponse: (response: RuntimeResponse) => void) => {
   if (message?.type === "vcaa-run-demo") {
     chrome.tabs
       .query({ active: true, currentWindow: true })
-      .then(async (tabs) => {
+      .then(async (tabs: ChromeTabInfo[]) => {
         const tab = tabs[0];
         if (!tab?.id) {
           sendResponse({ status: "error", error: "No active tab" });
@@ -20,7 +37,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         );
         sendResponse(result);
       })
-      .catch((err) => sendResponse({ status: "error", error: String(err) }));
+      .catch((err: unknown) => sendResponse({ status: "error", error: String(err) }));
     return true;
   }
 
@@ -63,7 +80,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await persistHumanActiveState();
 
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const tab = tabs[0];
+      const tab = tabs[0] as ChromeTabInfo | undefined;
       if (tab?.id) {
         await enrollHumanTab(tab.id);
         await captureHumanSnapshotForTab(tab.id);
@@ -91,7 +108,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const tab = tabs[0];
+      const tab = tabs[0] as ChromeTabInfo | undefined;
       const result = await stopHumanRecording(tab?.id);
       sendResponse(result);
     })();
@@ -126,8 +143,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       await ensureDebuggerAttached(tabId);
       const axTree = await captureHumanSnapshotForTab(tabId);
-      const target = await resolveHumanActionTarget(tabId, message.payload, axTree);
-      await appendHumanAction(message.payload, target, tabId);
+      const payload = message.payload as HumanActionPayload;
+      const target = await resolveHumanActionTarget(tabId, payload, axTree);
+      await appendHumanAction(payload, target, tabId);
       sendResponse({ status: "ok" });
     })();
     return true;
@@ -155,14 +173,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "vcaa-get-security-state") {
     getStoredSecurityState()
       .then((state) => sendResponse({ status: "ok", state }))
-      .catch((err) => sendResponse({ status: "error", error: err?.message || String(err) }));
+      .catch((err: unknown) =>
+        sendResponse({ status: "error", error: (err as { message?: string })?.message || String(err) })
+      );
     return true;
   }
 
   if (message?.type === "vcaa-get-last-debug") {
     readLastDebug()
       .then((payload) => sendResponse({ status: "ok", payload }))
-      .catch((err) => sendResponse({ status: "error", error: String(err) }));
+      .catch((err: unknown) => sendResponse({ status: "error", error: String(err) }));
     return true;
   }
 
@@ -170,7 +190,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "vcaa-collect-axtree") {
     chrome.tabs
       .query({ active: true, currentWindow: true })
-      .then(async (tabs) => {
+      .then(async (tabs: ChromeTabInfo[]) => {
         const tab = tabs[0];
         if (!tab?.id) {
           sendResponse({ status: "error", error: "No active tab" });
@@ -184,7 +204,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ status: "error", error: String(err) });
         }
       })
-      .catch((err) => sendResponse({ status: "error", error: String(err) }));
+      .catch((err: unknown) => sendResponse({ status: "error", error: String(err) }));
     return true;
   }
 
@@ -192,7 +212,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "vcaa-cdp-execute") {
     chrome.tabs
       .query({ active: true, currentWindow: true })
-      .then(async (tabs) => {
+      .then(async (tabs: ChromeTabInfo[]) => {
         const tab = tabs[0];
         if (!tab?.id) {
           sendResponse({ status: "error", error: "No active tab" });
@@ -207,7 +227,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ status: "error", error: String(err) });
         }
       })
-      .catch((err) => sendResponse({ status: "error", error: String(err) }));
+      .catch((err: unknown) => sendResponse({ status: "error", error: String(err) }));
     return true;
   }
 
@@ -215,14 +235,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "vcaa-cdp-detach") {
     chrome.tabs
       .query({ active: true, currentWindow: true })
-      .then(async (tabs) => {
+      .then(async (tabs: ChromeTabInfo[]) => {
         const tab = tabs[0];
         if (tab?.id) {
           await detachDebugger(tab.id);
         }
         sendResponse({ status: "ok" });
       })
-      .catch((err) => sendResponse({ status: "error", error: String(err) }));
+      .catch((err: unknown) => sendResponse({ status: "error", error: String(err) }));
     return true;
   }
 

@@ -1,12 +1,12 @@
 (() => {
-  const globalScope =
+  const globalScope: typeof globalThis =
     typeof globalThis !== "undefined"
       ? globalThis
       : typeof window !== "undefined"
       ? window
       : typeof self !== "undefined"
       ? self
-      : {};
+      : ({} as typeof globalThis);
 
   const SENSITIVE_INPUT_TYPES = new Set(["password", "credit-card", "new-password", "current-password"]);
 
@@ -58,7 +58,7 @@
     /authenticator/i,
   ];
 
-  const readAttr = (el, attr) => {
+  const readAttr = (el: SensitiveFieldElement | null | undefined, attr: string): string => {
     if (!el) {
       return "";
     }
@@ -66,12 +66,19 @@
       return el.getAttribute(attr) || "";
     }
     if (attr in el) {
-      return el[attr] || "";
+      const value = (el as Record<string, unknown>)[attr];
+      if (typeof value === "string") {
+        return value;
+      }
+      if (value != null) {
+        return String(value);
+      }
+      return "";
     }
     return "";
   };
 
-  const matchesSensitivePattern = (...values) => {
+  const matchesSensitivePattern = (...values: Array<unknown>): boolean => {
     return values.some((value) => {
       if (!value) {
         return false;
@@ -80,7 +87,7 @@
     });
   };
 
-  const isSensitiveField = (el) => {
+  const isSensitiveField = (el: SensitiveFieldElement | null | undefined): boolean => {
     if (!el) {
       return false;
     }
@@ -116,7 +123,7 @@
     return false;
   };
 
-  const api = {
+  const api: VocalWebDomUtils = {
     SENSITIVE_INPUT_TYPES,
     SENSITIVE_AUTOCOMPLETE_VALUES,
     SENSITIVE_NAME_PATTERNS,

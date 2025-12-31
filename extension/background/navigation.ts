@@ -2,11 +2,14 @@
 // Navigation Completion Handler - Resume Pending Plans
 // ============================================================================
 
+type AxElement = { role?: string; name?: string; backend_node_id?: number };
+type WebNavigationDetails = { tabId: number; frameId?: number; url?: string };
+
 /**
  * Ensure the debugger is attached to a tab, re-attaching if needed.
  * @param {number} tabId - The tab ID
  */
-async function ensureDebuggerAttached(tabId) {
+async function ensureDebuggerAttached(tabId: number): Promise<void> {
   if (debuggerAttached.get(tabId)) {
     return;
   }
@@ -19,14 +22,14 @@ async function ensureDebuggerAttached(tabId) {
  * @param {number} timeoutMs - Timeout in milliseconds
  * @returns {Promise<boolean>} - True if loaded, false if timed out
  */
-function waitForTabLoad(tabId, timeoutMs = 10000) {
-  return new Promise((resolve) => {
+function waitForTabLoad(tabId: number, timeoutMs = 10000): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
     const timeout = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener);
       resolve(false);
     }, timeoutMs);
 
-    const listener = (updatedTabId, changeInfo) => {
+    const listener = (updatedTabId: number, changeInfo: ChromeTabChangeInfo) => {
       if (updatedTabId === tabId && changeInfo.status === "complete") {
         clearTimeout(timeout);
         chrome.tabs.onUpdated.removeListener(listener);
@@ -37,7 +40,7 @@ function waitForTabLoad(tabId, timeoutMs = 10000) {
     chrome.tabs.onUpdated.addListener(listener);
 
     // Check if already complete
-    chrome.tabs.get(tabId).then((tab) => {
+    chrome.tabs.get(tabId).then((tab: ChromeTabInfo) => {
       if (tab.status === "complete") {
         clearTimeout(timeout);
         chrome.tabs.onUpdated.removeListener(listener);
@@ -57,12 +60,15 @@ function waitForTabLoad(tabId, timeoutMs = 10000) {
  * @param {object} originalElement - The element to re-match (with name, role)
  * @returns {Promise<number|null>} - New backendDOMNodeId or null
  */
-async function rematchElementBySemantics(tabId, originalElement) {
+async function rematchElementBySemantics(
+  tabId: number,
+  originalElement: { role?: string; name?: string }
+): Promise<number | null> {
   const axNodes = await getAccessibilityTree(tabId);
   const elements = transformAXTree(axNodes);
 
   // Find best matching element by name and role
-  const candidates = elements.filter((el) => {
+  const candidates = elements.filter((el: AxElement) => {
     // Must have same role
     if (el.role !== originalElement.role) return false;
 
@@ -92,7 +98,7 @@ async function rematchElementBySemantics(tabId, originalElement) {
  * Resume execution of a pending plan after navigation completes.
  * @param {number} tabId - The tab ID
  */
-async function resumePendingPlanAfterNavigation(tabId) {
+async function resumePendingPlanAfterNavigation(tabId: number): Promise<void> {
   const pendingData = await getPendingPlan(tabId);
   if (!pendingData) {
     console.log(`[VCAA] No pending plan for tab ${tabId}`);
@@ -115,15 +121,15 @@ async function resumePendingPlanAfterNavigation(tabId) {
     await ensureDebuggerAttached(tabId);
 
     // Collect fresh AX tree
-    let axTree = await collectAccessibilityTree(tabId, traceId);
-    let planPhase = null;
-    let planFocusBackendIds = null;
-    let planTriggerNodeId = null;
+    let axTree: AxTree = await collectAccessibilityTree(tabId, traceId);
+    let planPhase: string | null = null;
+    let planFocusBackendIds: Set<number> | null = null;
+    let planTriggerNodeId: number | null = null;
     let replanCount = 0;
     const maxReplans = 1;
-    let axDiffs = [];
-    let execResult = null;
-    let executionPlan = null;
+    let axDiffs: AxDiff[] = [];
+    let execResult: ExecutionResult | null = null;
+    let executionPlan: ExecutionPlan | ClarificationRequest | null = null;
 
     while (true) {
       // Fetch new execution plan using the AX tree
@@ -136,8 +142,10 @@ async function resumePendingPlanAfterNavigation(tabId) {
         return;
       }
 
+      const resolvedExecutionPlan = executionPlan as ExecutionPlan;
+
       if (planPhase === "post_interaction") {
-        const originalSteps = executionPlan.steps || [];
+        const originalSteps = resolvedExecutionPlan.steps || [];
         const elementsByBackendId = buildElementsByBackendId(axTree);
         let filtered = originalSteps;
         if (planFocusBackendIds && planFocusBackendIds.size) {
@@ -160,19 +168,19 @@ async function resumePendingPlanAfterNavigation(tabId) {
               !(step.action_type === "click" && step.backend_node_id === planTriggerNodeId)
           );
         }
-        executionPlan.steps = filtered;
+        resolvedExecutionPlan.steps = filtered;
       }
 
-      await appendAgentDecisions(traceId, executionPlan, axTree);
+      await appendAgentDecisions(traceId, resolvedExecutionPlan, axTree);
       await persistLastDebug({
         status: "planned",
         actionPlan,
-        executionPlan,
+        executionPlan: resolvedExecutionPlan,
         axTree,
       });
 
       // Execute the plan using CDP
-      const executionOutcome = await executeAxPlanViaCDP(tabId, executionPlan, traceId, {
+      const executionOutcome = await executeAxPlanViaCDP(tabId, resolvedExecutionPlan, traceId, {
         axTree,
         captureAxDiff: true,
         onAxDiff: ({ step, axDiff }) => {
@@ -197,8 +205,10 @@ async function resumePendingPlanAfterNavigation(tabId) {
       if (Array.isArray(executionOutcome.axDiffs) && executionOutcome.axDiffs.length) {
         axDiffs.push(...executionOutcome.axDiffs);
       }
-      await sendExecutionResult(apiBase, execResult);
-      await appendAgentResults(traceId, execResult);
+      if (execResult) {
+        await sendExecutionResult(apiBase, execResult);
+        await appendAgentResults(traceId, execResult);
+      }
 
       if (executionOutcome.interrupted && executionOutcome.interruption?.phase) {
         replanCount += 1;
@@ -223,7 +233,7 @@ async function resumePendingPlanAfterNavigation(tabId) {
     const completedPayload = {
       status: "completed",
       actionPlan,
-      executionPlan,
+      executionPlan: executionPlan as ExecutionPlan,
       execResult,
       axTree,
       axDiffs,
@@ -238,7 +248,7 @@ async function resumePendingPlanAfterNavigation(tabId) {
 }
 
 // Listen for navigation completion to resume pending plans
-chrome.webNavigation.onCompleted.addListener(async (details) => {
+chrome.webNavigation.onCompleted.addListener(async (details: WebNavigationDetails) => {
   // Only handle main frame navigations
   if (details.frameId !== 0) {
     return;
