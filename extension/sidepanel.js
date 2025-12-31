@@ -383,9 +383,21 @@ function renderDebugInfo(resp) {
   debugOutputEl.textContent = formatDebugInfo(resp);
 }
 
+function refreshDebugFromStorage() {
+  chrome.runtime.sendMessage({ type: "vcaa-get-last-debug" }, (resp) => {
+    if (resp?.status !== "ok" || !resp.payload) {
+      return;
+    }
+    renderDebugInfo(resp.payload);
+  });
+}
+
 function applyRunDemoResponse(resp) {
   log(formatResponse(resp));
   renderDebugInfo(resp);
+  if (!resp?.executionPlan?.steps?.length) {
+    refreshDebugFromStorage();
+  }
   if (!resp) {
     console.log("Status: No response from extension");
     return;

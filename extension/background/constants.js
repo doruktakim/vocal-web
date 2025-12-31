@@ -9,6 +9,7 @@ const SIDE_PANEL_BEHAVIOR = { openPanelOnActionClick: true };
 const SESSION_STORAGE_KEYS = {
   PENDING_PLAN: "vcaaPendingPlan",
 };
+const LAST_DEBUG_STORAGE_KEY = "vcaaLastDebug";
 
 // ============================================================================
 // Debug Recording (feature-flagged via DEBUG_RECORDING=1 in sync storage)

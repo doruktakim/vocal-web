@@ -128,6 +128,12 @@ async function resumePendingPlanAfterNavigation(tabId) {
     }
 
     await appendAgentDecisions(traceId, executionPlan, axTree);
+    await persistLastDebug({
+      status: "planned",
+      actionPlan,
+      executionPlan,
+      axTree,
+    });
 
     // Execute the plan using CDP
     const execResult = await executeAxPlanViaCDP(tabId, executionPlan, traceId);
@@ -136,16 +142,15 @@ async function resumePendingPlanAfterNavigation(tabId) {
     const endedReason = execResult?.errors?.length ? "failed" : "completed";
     await finishAgentRecording(traceId, endedReason);
 
-    chrome.runtime.sendMessage({
-      type: "vcaa-run-demo-update",
-      payload: {
-        status: "completed",
-        actionPlan,
-        executionPlan,
-        execResult,
-        axTree,
-      },
-    });
+    const completedPayload = {
+      status: "completed",
+      actionPlan,
+      executionPlan,
+      execResult,
+      axTree,
+    };
+    await persistLastDebug(completedPayload);
+    chrome.runtime.sendMessage({ type: "vcaa-run-demo-update", payload: completedPayload });
 
     console.log(`[VCAA] Resumed AX plan execution complete for tab ${tabId}`);
   } catch (err) {

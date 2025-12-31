@@ -214,6 +214,18 @@ function shouldAskHumanClarification(clarification) {
   return HUMAN_CLARIFICATION_REASONS.has(clarification.reason);
 }
 
+async function persistLastDebug(payload) {
+  if (!payload) {
+    return;
+  }
+  await chrome.storage.session.set({ [LAST_DEBUG_STORAGE_KEY]: payload });
+}
+
+async function readLastDebug() {
+  const stored = await chrome.storage.session.get([LAST_DEBUG_STORAGE_KEY]);
+  return stored[LAST_DEBUG_STORAGE_KEY] || null;
+}
+
 /**
  * AX-mode demo flow with proper navigation handling.
  * Uses accessibility tree and CDP for element interaction.
@@ -319,6 +331,12 @@ async function runDemoFlowInternalAX(
       }
 
       await appendAgentDecisions(traceId, executionPlan, axTree);
+      await persistLastDebug({
+        status: "planned",
+        actionPlan,
+        executionPlan,
+        axTree,
+      });
 
       // Check if the plan contains navigation steps
       const navStep = (executionPlan.steps || []).find(
@@ -364,13 +382,15 @@ async function runDemoFlowInternalAX(
         };
         await appendAgentResults(traceId, execResult);
         await finishAgentRecording(traceId, "completed");
-        return {
+        const completedPayload = {
           status: "completed",
           actionPlan,
           executionPlan,
           execResult,
           axTree,
         };
+        await persistLastDebug(completedPayload);
+        return completedPayload;
       }
 
       // Execute non-navigation steps via CDP
@@ -392,7 +412,15 @@ async function runDemoFlowInternalAX(
 
     const endedReason = execResult?.errors?.length ? "failed" : "completed";
     await finishAgentRecording(traceId, endedReason);
-    return { status: "completed", actionPlan, executionPlan, execResult, axTree };
+    const completedPayload = {
+      status: "completed",
+      actionPlan,
+      executionPlan,
+      execResult,
+      axTree,
+    };
+    await persistLastDebug(completedPayload);
+    return completedPayload;
   } catch (err) {
     if (traceId) {
       await finishAgentRecording(traceId, "failed");

@@ -159,6 +159,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "vcaa-get-last-debug") {
+    readLastDebug()
+      .then((payload) => sendResponse({ status: "ok", payload }))
+      .catch((err) => sendResponse({ status: "error", error: String(err) }));
+    return true;
+  }
+
   // Collect accessibility tree via CDP
   if (message?.type === "vcaa-collect-axtree") {
     chrome.tabs
