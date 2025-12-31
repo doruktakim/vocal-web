@@ -79,6 +79,7 @@ function buildRecordingBase({ mode, id, promptType, promptText }) {
       urls: [],
       action_count: 0,
       ax_snapshot_count: 0,
+      ax_diff_count: 0,
       ended_reason: null,
     },
   };
@@ -101,11 +102,15 @@ function appendTimelineEntry(recording, entry) {
   }
   recording.timeline.push(entry);
   if (!recording.summary) {
-    recording.summary = { urls: [], action_count: 0, ax_snapshot_count: 0, ended_reason: null };
+    recording.summary = { urls: [], action_count: 0, ax_snapshot_count: 0, ax_diff_count: 0, ended_reason: null };
   }
   if (entry.kind === "ax_snapshot") {
     recording.summary.ax_snapshot_count += 1;
     addUrlToSummary(recording, entry.url || entry.snapshot?.page_url);
+  }
+  if (entry.kind === "ax_diff") {
+    recording.summary.ax_diff_count = (recording.summary.ax_diff_count || 0) + 1;
+    addUrlToSummary(recording, entry.url || entry.diff?.page_url);
   }
   if (entry.kind === "decision" || entry.kind === "human_action") {
     recording.summary.action_count += 1;
@@ -229,6 +234,25 @@ async function appendAgentAxSnapshot(traceId, axTree, tabId) {
 }
 
 globalThis.appendAgentAxSnapshot = appendAgentAxSnapshot;
+
+async function appendAgentAxDiff(traceId, axDiff, tabId, stepId) {
+  const recorder = await getAgentRecorder(traceId);
+  if (!recorder || !axDiff) {
+    return;
+  }
+  const entry = {
+    t: new Date().toISOString(),
+    kind: "ax_diff",
+    url: axDiff?.page_url || null,
+    tab_id: tabId ?? null,
+    step_id: stepId ?? null,
+    diff: axDiff,
+  };
+  appendTimelineEntry(recorder.recording, entry);
+  await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
+}
+
+globalThis.appendAgentAxDiff = appendAgentAxDiff;
 
 async function appendAgentDecisions(traceId, executionPlan, axTree) {
   const recorder = await getAgentRecorder(traceId);

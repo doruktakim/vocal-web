@@ -115,30 +115,108 @@ async function resumePendingPlanAfterNavigation(tabId) {
     await ensureDebuggerAttached(tabId);
 
     // Collect fresh AX tree
-    const axTree = await collectAccessibilityTree(tabId, traceId);
+    let axTree = await collectAccessibilityTree(tabId, traceId);
+    let planPhase = null;
+    let planFocusBackendIds = null;
+    let planTriggerNodeId = null;
+    let replanCount = 0;
+    const maxReplans = 1;
+    let axDiffs = [];
+    let execResult = null;
+    let executionPlan = null;
 
-    // Fetch new execution plan using the AX tree
-    const executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId);
+    while (true) {
+      // Fetch new execution plan using the AX tree
+      executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId, planPhase);
 
-    if (executionPlan.schema_version === "clarification_v1") {
-      console.log(`[VCAA] Navigator requested clarification after navigation`);
-      // Can't easily surface clarification here, log and exit
-      await finishAgentRecording(traceId, "clarification");
-      return;
+      if (executionPlan.schema_version === "clarification_v1") {
+        console.log(`[VCAA] Navigator requested clarification after navigation`);
+        // Can't easily surface clarification here, log and exit
+        await finishAgentRecording(traceId, "clarification");
+        return;
+      }
+
+      if (planPhase === "post_interaction") {
+        const originalSteps = executionPlan.steps || [];
+        const elementsByBackendId = buildElementsByBackendId(axTree);
+        let filtered = originalSteps;
+        if (planFocusBackendIds && planFocusBackendIds.size) {
+          filtered = originalSteps.filter(
+            (step) =>
+              step.backend_node_id != null &&
+              (planFocusBackendIds.has(step.backend_node_id) ||
+                isLikelyConfirmAction(step, elementsByBackendId))
+          );
+        }
+        if (planTriggerNodeId != null) {
+          filtered = filtered.filter(
+            (step) =>
+              !(step.action_type === "click" && step.backend_node_id === planTriggerNodeId)
+          );
+        }
+        if (filtered.length === 0) {
+          filtered = originalSteps.filter(
+            (step) =>
+              !(step.action_type === "click" && step.backend_node_id === planTriggerNodeId)
+          );
+        }
+        executionPlan.steps = filtered;
+      }
+
+      await appendAgentDecisions(traceId, executionPlan, axTree);
+      await persistLastDebug({
+        status: "planned",
+        actionPlan,
+        executionPlan,
+        axTree,
+      });
+
+      // Execute the plan using CDP
+      const executionOutcome = await executeAxPlanViaCDP(tabId, executionPlan, traceId, {
+        axTree,
+        captureAxDiff: true,
+        onAxDiff: ({ step, axDiff }) => {
+          if (replanCount >= maxReplans) {
+            return null;
+          }
+          if (!shouldReplanForInteraction(axDiff, step)) {
+            return null;
+          }
+          const focusBackendIds = Array.from(collectBackendIdsFromDiff(axDiff));
+          return {
+            stop: true,
+            reason: "ui_expansion",
+            phase: "post_interaction",
+            focus_backend_ids: focusBackendIds,
+            trigger_backend_node_id: step.backend_node_id ?? null,
+          };
+        },
+      });
+      execResult = executionOutcome.result;
+      axTree = executionOutcome.axTree || axTree;
+      if (Array.isArray(executionOutcome.axDiffs) && executionOutcome.axDiffs.length) {
+        axDiffs.push(...executionOutcome.axDiffs);
+      }
+      await sendExecutionResult(apiBase, execResult);
+      await appendAgentResults(traceId, execResult);
+
+      if (executionOutcome.interrupted && executionOutcome.interruption?.phase) {
+        replanCount += 1;
+        planPhase = executionOutcome.interruption.phase;
+        const focusIds = executionOutcome.interruption.focus_backend_ids || [];
+        const triggerNodeId = executionOutcome.interruption.trigger_backend_node_id ?? null;
+        if (focusIds.length) {
+          planFocusBackendIds = new Set(focusIds);
+        } else {
+          planFocusBackendIds = null;
+        }
+        planTriggerNodeId = triggerNodeId;
+        continue;
+      }
+
+      break;
     }
 
-    await appendAgentDecisions(traceId, executionPlan, axTree);
-    await persistLastDebug({
-      status: "planned",
-      actionPlan,
-      executionPlan,
-      axTree,
-    });
-
-    // Execute the plan using CDP
-    const execResult = await executeAxPlanViaCDP(tabId, executionPlan, traceId);
-    await sendExecutionResult(apiBase, execResult);
-    await appendAgentResults(traceId, execResult);
     const endedReason = execResult?.errors?.length ? "failed" : "completed";
     await finishAgentRecording(traceId, endedReason);
 
@@ -148,6 +226,7 @@ async function resumePendingPlanAfterNavigation(tabId) {
       executionPlan,
       execResult,
       axTree,
+      axDiffs,
     };
     await persistLastDebug(completedPayload);
     chrome.runtime.sendMessage({ type: "vcaa-run-demo-update", payload: completedPayload });

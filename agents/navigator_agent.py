@@ -78,6 +78,7 @@ async def build_ax_execution_plan(
     based on semantic roles and accessible names.
     """
     action = (nav_request.action_plan.action or "").lower()
+    phase = getattr(nav_request, "phase", None)
     entities = nav_request.action_plan.entities or {}
     trace_id = nav_request.trace_id
 
@@ -142,7 +143,7 @@ async def build_ax_execution_plan(
     # For complex actions, use intent-based matching
     if action in {"search_flights", "flight_search", "search_hotels", "search_stays", "search_travel"}:
         # Multi-step: origin -> destination -> dates -> search
-        steps = _build_search_form_steps(ax_tree, intent, trace_id)
+        steps = _build_search_form_steps(ax_tree, intent, trace_id, phase=phase)
 
     elif action in {"search_content", "search", "search_site"}:
         # Find search box, input query, optionally click search button
@@ -243,8 +244,92 @@ async def build_ax_execution_plan(
     )
 
 
+def _build_date_steps(
+    ax_tree: AXTree,
+    intent: Intent,
+    trace_id: str,
+    *,
+    allow_open_buttons: bool = True,
+    include_search: bool = True,
+) -> list[AXExecutionStep]:
+    """Build steps for selecting dates, optionally skipping date buttons and search."""
+    steps: list[AXExecutionStep] = []
+    used_ax_ids: list[str] = []
+
+    if intent.date:
+        date_cell = find_date_cell(ax_tree, intent.date)
+        if date_cell:
+            used_ax_ids.append(date_cell.ax_id)
+            steps.append(
+                AXExecutionStep(
+                    step_id=f"s_date_start_{make_uuid()[:8]}",
+                    action_type="click",
+                    backend_node_id=date_cell.backend_node_id,
+                    confidence=0.85,
+                    notes=f"Start date cell: {date_cell.name[:30] if date_cell.name else 'cell'}",
+                )
+            )
+        elif allow_open_buttons:
+            date_button = find_date_button(ax_tree, "start", exclude_ax_ids=used_ax_ids)
+            if date_button:
+                used_ax_ids.append(date_button.ax_id)
+                steps.append(
+                    AXExecutionStep(
+                        step_id=f"s_date_start_btn_{make_uuid()[:8]}",
+                        action_type="click",
+                        backend_node_id=date_button.backend_node_id,
+                        confidence=0.75,
+                        notes=f"Open date picker: {date_button.name[:30] if date_button.name else 'button'}",
+                    )
+                )
+
+    if intent.date_end:
+        date_end_cell = find_date_cell(ax_tree, intent.date_end)
+        if date_end_cell:
+            used_ax_ids.append(date_end_cell.ax_id)
+            steps.append(
+                AXExecutionStep(
+                    step_id=f"s_date_end_{make_uuid()[:8]}",
+                    action_type="click",
+                    backend_node_id=date_end_cell.backend_node_id,
+                    confidence=0.85,
+                    notes=f"End date cell: {date_end_cell.name[:30] if date_end_cell.name else 'cell'}",
+                )
+            )
+        elif allow_open_buttons:
+            date_end_button = find_date_button(ax_tree, "end", exclude_ax_ids=used_ax_ids)
+            if date_end_button:
+                used_ax_ids.append(date_end_button.ax_id)
+                steps.append(
+                    AXExecutionStep(
+                        step_id=f"s_date_end_btn_{make_uuid()[:8]}",
+                        action_type="click",
+                        backend_node_id=date_end_button.backend_node_id,
+                        confidence=0.75,
+                        notes=f"Open return date picker: {date_end_button.name[:30] if date_end_button.name else 'button'}",
+                    )
+                )
+
+    if include_search:
+        if (intent.date or intent.date_end) and not steps:
+            return steps
+        search_btn = find_action_button(ax_tree, ["search", "find", "go"])
+        if search_btn:
+            steps.append(
+                AXExecutionStep(
+                    step_id=f"s_search_{make_uuid()[:8]}",
+                    action_type="click",
+                    backend_node_id=search_btn.backend_node_id,
+                    confidence=0.9,
+                    notes=f"Search: {search_btn.name[:30] if search_btn.name else 'button'}",
+                )
+            )
+
+    return steps
+
+
 def _build_search_form_steps(
-    ax_tree: AXTree, intent: Intent, trace_id: str
+    ax_tree: AXTree, intent: Intent, trace_id: str, *, phase: Optional[str] = None
 ) -> list[AXExecutionStep]:
     """Build steps for filling a search form (flights, hotels, etc.).
     
@@ -263,7 +348,7 @@ def _build_search_form_steps(
     # Step 1: Origin (if provided)
     # Use input_select for comboboxes to handle autocomplete selection
     origin_field = None
-    if intent.origin:
+    if intent.origin and phase != "post_interaction":
         origin_field = find_input_field(ax_tree, "origin", exclude_ax_ids=used_ax_ids)
         if origin_field:
             used_ax_ids.append(origin_field.ax_id)
@@ -282,7 +367,7 @@ def _build_search_form_steps(
             )
 
     # Step 2: Destination - EXCLUDE origin field to prevent duplicate selection
-    if intent.location:
+    if intent.location and phase != "post_interaction":
         dest_field = find_input_field(ax_tree, "destination", exclude_ax_ids=used_ax_ids)
         if dest_field:
             used_ax_ids.append(dest_field.ax_id)
@@ -300,81 +385,16 @@ def _build_search_form_steps(
                 )
             )
 
-    # Step 3: Start date handling
-    # Strategy: First check if calendar is already open (date cells visible).
-    # If not, click the date BUTTON to open the calendar.
-    # Note: After clicking the button, a new AX tree will be needed to select the date cell.
-    if intent.date:
-        # First try to find a date cell directly (if calendar is already open)
-        date_cell = find_date_cell(ax_tree, intent.date)
-        if date_cell:
-            used_ax_ids.append(date_cell.ax_id)
-            steps.append(
-                AXExecutionStep(
-                    step_id=f"s_date_start_{make_uuid()[:8]}",
-                    action_type="click",
-                    backend_node_id=date_cell.backend_node_id,
-                    confidence=0.85,
-                    notes=f"Start date cell: {date_cell.name[:30] if date_cell.name else 'cell'}",
-                )
-            )
-        else:
-            # Calendar not open - find and click the date BUTTON to open it
-            date_button = find_date_button(ax_tree, "start", exclude_ax_ids=used_ax_ids)
-            if date_button:
-                used_ax_ids.append(date_button.ax_id)
-                steps.append(
-                    AXExecutionStep(
-                        step_id=f"s_date_start_btn_{make_uuid()[:8]}",
-                        action_type="click",
-                        backend_node_id=date_button.backend_node_id,
-                        confidence=0.75,
-                        notes=f"Open date picker: {date_button.name[:30] if date_button.name else 'button'}",
-                    )
-                )
-
-    # Step 4: End date (for return flights, checkout)
-    if intent.date_end:
-        # First try to find a date cell directly
-        date_end_cell = find_date_cell(ax_tree, intent.date_end)
-        if date_end_cell:
-            used_ax_ids.append(date_end_cell.ax_id)
-            steps.append(
-                AXExecutionStep(
-                    step_id=f"s_date_end_{make_uuid()[:8]}",
-                    action_type="click",
-                    backend_node_id=date_end_cell.backend_node_id,
-                    confidence=0.85,
-                    notes=f"End date cell: {date_end_cell.name[:30] if date_end_cell.name else 'cell'}",
-                )
-            )
-        else:
-            # Calendar not open - find and click the return/checkout date BUTTON
-            date_end_button = find_date_button(ax_tree, "end", exclude_ax_ids=used_ax_ids)
-            if date_end_button:
-                used_ax_ids.append(date_end_button.ax_id)
-                steps.append(
-                    AXExecutionStep(
-                        step_id=f"s_date_end_btn_{make_uuid()[:8]}",
-                        action_type="click",
-                        backend_node_id=date_end_button.backend_node_id,
-                        confidence=0.75,
-                        notes=f"Open return date picker: {date_end_button.name[:30] if date_end_button.name else 'button'}",
-                    )
-                )
-
-    # Step 5: Search button - use improved scoring to find actual search button
-    search_btn = find_action_button(ax_tree, ["search", "find", "go"])
-    if search_btn:
-        steps.append(
-            AXExecutionStep(
-                step_id=f"s_search_{make_uuid()[:8]}",
-                action_type="click",
-                backend_node_id=search_btn.backend_node_id,
-                confidence=0.9,
-                notes=f"Search: {search_btn.name[:30] if search_btn.name else 'button'}",
-            )
+    allow_open_buttons = phase != "post_interaction"
+    steps.extend(
+        _build_date_steps(
+            ax_tree,
+            intent,
+            trace_id,
+            allow_open_buttons=allow_open_buttons,
+            include_search=True,
         )
+    )
 
     return steps
 

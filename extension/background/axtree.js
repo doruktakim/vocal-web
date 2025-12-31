@@ -74,6 +74,96 @@ function transformAXTree(axNodes) {
   return elements;
 }
 
+function buildAxSignature(el) {
+  return [
+    el.role || "",
+    el.name || "",
+    el.description || "",
+    el.value || "",
+    String(Boolean(el.focusable)),
+    String(Boolean(el.focused)),
+    String(Boolean(el.expanded)),
+    String(Boolean(el.disabled)),
+    String(el.checked),
+    String(el.selected),
+    String(el.backend_node_id || ""),
+  ].join("|");
+}
+
+function toAxDiffEntry(el) {
+  if (!el) {
+    return null;
+  }
+  return {
+    ax_id: el.ax_id,
+    backend_node_id: el.backend_node_id ?? null,
+    role: el.role || "",
+    name: el.name || "",
+    description: el.description || "",
+    value: el.value || "",
+    focusable: Boolean(el.focusable),
+    focused: Boolean(el.focused),
+    expanded: el.expanded ?? null,
+    disabled: Boolean(el.disabled),
+    checked: el.checked ?? null,
+    selected: el.selected ?? null,
+  };
+}
+
+function diffAXTrees(prevTree, nextTree) {
+  const prevElements = Array.isArray(prevTree?.elements) ? prevTree.elements : [];
+  const nextElements = Array.isArray(nextTree?.elements) ? nextTree.elements : [];
+  const prevMap = new Map();
+
+  for (const el of prevElements) {
+    if (!el?.ax_id) continue;
+    prevMap.set(el.ax_id, el);
+  }
+
+  const added = [];
+  const changed = [];
+  const seen = new Set();
+
+  for (const el of nextElements) {
+    if (!el?.ax_id) continue;
+    const prev = prevMap.get(el.ax_id);
+    if (!prev) {
+      added.push(toAxDiffEntry(el));
+    } else if (buildAxSignature(prev) !== buildAxSignature(el)) {
+      changed.push({
+        before: toAxDiffEntry(prev),
+        after: toAxDiffEntry(el),
+      });
+    }
+    seen.add(el.ax_id);
+  }
+
+  const removed = [];
+  for (const [axId, prev] of prevMap.entries()) {
+    if (!seen.has(axId)) {
+      removed.push(toAxDiffEntry(prev));
+    }
+  }
+
+  return {
+    schema_version: "axtree_diff_v1",
+    id: crypto.randomUUID(),
+    trace_id: nextTree?.trace_id || prevTree?.trace_id || null,
+    page_url: nextTree?.page_url || prevTree?.page_url || null,
+    generated_at: new Date().toISOString(),
+    counts: {
+      prev: prevElements.length,
+      next: nextElements.length,
+      added: added.length,
+      removed: removed.length,
+      changed: changed.length,
+    },
+    added,
+    removed,
+    changed,
+  };
+}
+
 /**
  * Collect accessibility tree for a tab and return transformed elements.
  * @param {number} tabId - The tab ID
@@ -101,4 +191,16 @@ async function collectAccessibilityTree(tabId, traceId) {
     await globalThis.appendAgentAxSnapshot(traceId, payload, tabId);
   }
   return payload;
+}
+
+async function captureAccessibilityTreeWithDiff(tabId, traceId, prevTree, stepId) {
+  const nextTree = await collectAccessibilityTree(tabId, traceId);
+  const axDiff = prevTree ? diffAXTrees(prevTree, nextTree) : null;
+  if (axDiff && stepId) {
+    axDiff.step_id = stepId;
+  }
+  if (axDiff && typeof globalThis.appendAgentAxDiff === "function") {
+    await globalThis.appendAgentAxDiff(traceId, axDiff, tabId, stepId);
+  }
+  return { axTree: nextTree, axDiff };
 }

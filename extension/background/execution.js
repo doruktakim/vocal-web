@@ -37,9 +37,10 @@ async function fetchActionPlan(
  * @param {object} actionPlan - The action plan from the interpreter
  * @param {object} axTree - The accessibility tree
  * @param {string} traceId - Trace ID for logging
+ * @param {string|null} phase - Optional planning phase hint
  * @returns {Promise<object>} - Execution plan or clarification
  */
-async function fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId) {
+async function fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId, phase = null) {
   const body = {
     schema_version: "axnavigator_v1",
     id: crypto.randomUUID(),
@@ -47,6 +48,9 @@ async function fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId) {
     action_plan: actionPlan,
     ax_tree: axTree,
   };
+  if (phase) {
+    body.phase = phase;
+  }
   return authorizedRequest(apiBase, "/api/navigator/ax-executionplan", body);
 }
 
@@ -55,11 +59,49 @@ async function fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId) {
  * @param {number} tabId - The tab ID
  * @param {object} executionPlan - The execution plan with backend_node_id references
  * @param {string} traceId - Trace ID for logging
- * @returns {Promise<object>} - Execution result
+ * @returns {Promise<object>} - Execution outcome { result, axTree, axDiffs }
  */
-async function executeAxPlanViaCDP(tabId, executionPlan, traceId) {
+async function executeAxPlanViaCDP(tabId, executionPlan, traceId, options = {}) {
   const stepResults = [];
   const errors = [];
+  const axDiffs = [];
+  let currentAxTree = options.axTree || null;
+  const captureAxDiff = Boolean(options.captureAxDiff);
+  const postStepDelayMs = Number.isFinite(options.postStepDelayMs) ? options.postStepDelayMs : 150;
+  let interruption = null;
+
+  const maybeCaptureDiff = async (step) => {
+    if (postStepDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, postStepDelayMs));
+    }
+    if (!captureAxDiff) {
+      return;
+    }
+    try {
+      const { axTree, axDiff } = await captureAccessibilityTreeWithDiff(
+        tabId,
+        traceId,
+        currentAxTree,
+        step?.step_id
+      );
+      currentAxTree = axTree;
+      if (axDiff) {
+        axDiffs.push({ step_id: step?.step_id, diff: axDiff });
+        if (typeof options.onAxDiff === "function" && !interruption) {
+          const decision = options.onAxDiff({
+            step,
+            axDiff,
+            axTree: currentAxTree,
+          });
+          if (decision?.stop) {
+            interruption = decision;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[VCAA] Failed to capture AX diff:", err);
+    }
+  };
 
   for (const step of executionPlan.steps || []) {
     const start = performance.now();
@@ -108,6 +150,10 @@ async function executeAxPlanViaCDP(tabId, executionPlan, traceId) {
         error: "Missing backend_node_id for CDP execution",
       });
       errors.push({ step_id: step.step_id, error: "Missing backend_node_id" });
+      await maybeCaptureDiff(step);
+      if (interruption) {
+        break;
+      }
       continue;
     }
 
@@ -132,17 +178,29 @@ async function executeAxPlanViaCDP(tabId, executionPlan, traceId) {
       errors.push({ step_id: step.step_id, error: String(err) });
     }
 
-    // Small delay between steps to allow UI to update
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await maybeCaptureDiff(step);
+    if (interruption) {
+      break;
+    }
   }
 
+  const status = errors.length === 0
+    ? (interruption ? "partial" : "success")
+    : "partial";
+
   return {
-    schema_version: "executionresult_v1",
-    id: crypto.randomUUID(),
-    trace_id: traceId,
-    step_results: stepResults,
-    errors,
-    status: errors.length === 0 ? "success" : "partial",
+    result: {
+      schema_version: "executionresult_v1",
+      id: crypto.randomUUID(),
+      trace_id: traceId,
+      step_results: stepResults,
+      errors,
+      status,
+    },
+    axTree: currentAxTree,
+    axDiffs,
+    interrupted: Boolean(interruption),
+    interruption,
   };
 }
 
@@ -224,6 +282,107 @@ async function persistLastDebug(payload) {
 async function readLastDebug() {
   const stored = await chrome.storage.session.get([LAST_DEBUG_STORAGE_KEY]);
   return stored[LAST_DEBUG_STORAGE_KEY] || null;
+}
+
+function collectBackendIdsFromDiff(axDiff) {
+  const ids = new Set();
+  const added = Array.isArray(axDiff?.added) ? axDiff.added : [];
+  const changed = Array.isArray(axDiff?.changed) ? axDiff.changed : [];
+  for (const el of added) {
+    if (el?.backend_node_id != null) {
+      ids.add(el.backend_node_id);
+    }
+  }
+  for (const change of changed) {
+    const el = change?.after;
+    if (el?.backend_node_id != null) {
+      ids.add(el.backend_node_id);
+    }
+  }
+  return ids;
+}
+
+function buildElementsByBackendId(axTree) {
+  const elements = Array.isArray(axTree?.elements) ? axTree.elements : [];
+  return new Map(elements.map((el) => [el.backend_node_id, el]));
+}
+
+function isLikelyConfirmAction(step, elementsByBackendId) {
+  if (!step || step.action_type !== "click") {
+    return false;
+  }
+  const el = elementsByBackendId.get(step.backend_node_id);
+  if (!el?.name) {
+    return false;
+  }
+  const name = String(el.name).toLowerCase();
+  const keywords = ["search", "apply", "done", "ok", "confirm", "save", "update", "submit", "close"];
+  return keywords.some((kw) => name.includes(kw));
+}
+
+function didToggleState(change) {
+  const before = change?.before;
+  const after = change?.after;
+  if (!before || !after) {
+    return false;
+  }
+  return (
+    before.expanded !== after.expanded ||
+    before.selected !== after.selected ||
+    before.checked !== after.checked ||
+    before.disabled !== after.disabled ||
+    before.focused !== after.focused
+  );
+}
+
+function isTrivialSelfChange(axDiff, step) {
+  const added = Array.isArray(axDiff?.added) ? axDiff.added : [];
+  const changed = Array.isArray(axDiff?.changed) ? axDiff.changed : [];
+  if (added.length !== 0 || changed.length !== 1) {
+    return false;
+  }
+  const change = changed[0];
+  const sameTarget =
+    change?.after?.backend_node_id != null &&
+    step?.backend_node_id != null &&
+    change.after.backend_node_id === step.backend_node_id;
+  if (!sameTarget) {
+    return false;
+  }
+  return !didToggleState(change);
+}
+
+function isRelevantInteractionDiff(axDiff, step) {
+  if (!axDiff || !step) {
+    return false;
+  }
+  if (isTrivialSelfChange(axDiff, step)) {
+    return false;
+  }
+  const added = Array.isArray(axDiff.added) ? axDiff.added : [];
+  const changed = Array.isArray(axDiff.changed) ? axDiff.changed : [];
+  if (!added.length && !changed.length) {
+    return false;
+  }
+  if (changed.some(didToggleState)) {
+    return true;
+  }
+  const score = added.length * 2 + changed.length;
+  if (score >= 4) {
+    return true;
+  }
+  return added.length >= 1 && changed.length >= 1;
+}
+
+function shouldReplanForInteraction(axDiff, step) {
+  if (!step) {
+    return false;
+  }
+  const actionType = step.action_type;
+  if (!["click", "focus"].includes(actionType)) {
+    return false;
+  }
+  return isRelevantInteractionDiff(axDiff, step);
 }
 
 /**
@@ -317,10 +476,16 @@ async function runDemoFlowInternalAX(
     // No navigation needed, proceed with execution
     let executionPlan = null;
     let execResult = null;
+    let axDiffs = [];
+    let planPhase = null;
+    let planFocusBackendIds = null;
+    let planTriggerNodeId = null;
+    let replanCount = 0;
+    const maxReplans = 1;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       // Fetch execution plan using AX tree
-      executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId);
+      executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId, planPhase);
 
       if (executionPlan.schema_version === "clarification_v1") {
         await finishAgentRecording(traceId, "clarification");
@@ -328,6 +493,33 @@ async function runDemoFlowInternalAX(
           return { status: "needs_clarification", executionPlan, axTree };
         }
         return { status: "needs_clarification", executionPlan, axTree };
+      }
+
+      if (planPhase === "post_interaction") {
+        const originalSteps = executionPlan.steps || [];
+        const elementsByBackendId = buildElementsByBackendId(axTree);
+        let filtered = originalSteps;
+        if (planFocusBackendIds && planFocusBackendIds.size) {
+          filtered = originalSteps.filter(
+            (step) =>
+              step.backend_node_id != null &&
+              (planFocusBackendIds.has(step.backend_node_id) ||
+                isLikelyConfirmAction(step, elementsByBackendId))
+          );
+        }
+        if (planTriggerNodeId != null) {
+          filtered = filtered.filter(
+            (step) =>
+              !(step.action_type === "click" && step.backend_node_id === planTriggerNodeId)
+          );
+        }
+        if (filtered.length === 0) {
+          filtered = originalSteps.filter(
+            (step) =>
+              !(step.action_type === "click" && step.backend_node_id === planTriggerNodeId)
+          );
+        }
+        executionPlan.steps = filtered;
       }
 
       await appendAgentDecisions(traceId, executionPlan, axTree);
@@ -388,15 +580,54 @@ async function runDemoFlowInternalAX(
           executionPlan,
           execResult,
           axTree,
+          axDiffs: [],
         };
         await persistLastDebug(completedPayload);
         return completedPayload;
       }
 
       // Execute non-navigation steps via CDP
-      execResult = await executeAxPlanViaCDP(tabId, executionPlan, traceId);
+      const executionOutcome = await executeAxPlanViaCDP(tabId, executionPlan, traceId, {
+        axTree,
+        captureAxDiff: true,
+        onAxDiff: ({ step, axDiff }) => {
+          if (replanCount >= maxReplans) {
+            return null;
+          }
+          if (!shouldReplanForInteraction(axDiff, step)) {
+            return null;
+          }
+          const focusBackendIds = Array.from(collectBackendIdsFromDiff(axDiff));
+          return {
+            stop: true,
+            reason: "ui_expansion",
+            phase: "post_interaction",
+            focus_backend_ids: focusBackendIds,
+            trigger_backend_node_id: step.backend_node_id ?? null,
+          };
+        },
+      });
+      execResult = executionOutcome.result;
+      axTree = executionOutcome.axTree || axTree;
+      if (Array.isArray(executionOutcome.axDiffs) && executionOutcome.axDiffs.length) {
+        axDiffs.push(...executionOutcome.axDiffs);
+      }
       await sendExecutionResult(apiBase, execResult);
       await appendAgentResults(traceId, execResult);
+
+      if (executionOutcome.interrupted && executionOutcome.interruption?.phase) {
+        replanCount += 1;
+        planPhase = executionOutcome.interruption.phase;
+        const focusIds = executionOutcome.interruption.focus_backend_ids || [];
+        const triggerNodeId = executionOutcome.interruption.trigger_backend_node_id ?? null;
+        if (focusIds.length) {
+          planFocusBackendIds = new Set(focusIds);
+        } else {
+          planFocusBackendIds = null;
+        }
+        planTriggerNodeId = triggerNodeId;
+        continue;
+      }
 
       const executionErrors = execResult?.errors || [];
       if (executionErrors.length) {
@@ -418,6 +649,7 @@ async function runDemoFlowInternalAX(
       executionPlan,
       execResult,
       axTree,
+      axDiffs,
     };
     await persistLastDebug(completedPayload);
     return completedPayload;
