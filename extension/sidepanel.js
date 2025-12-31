@@ -11,6 +11,8 @@ const requireHttpsToggle = document.getElementById("requireHttps");
 const useAccessibilityTreeToggle = document.getElementById("useAccessibilityTree");
 const axModeStatus = document.getElementById("axModeStatus");
 const outputEl = document.getElementById("output");
+const debugOutputEl = document.getElementById("debugOutput");
+const debugCopyButton = document.getElementById("debugCopy");
 const clarificationPanel = document.getElementById("clarificationPanel");
 const clarificationCard = document.getElementById("clarificationCard");
 const clarificationHistoryContainer = document.getElementById("clarificationHistory");
@@ -303,6 +305,134 @@ function log(msg) {
   outputEl.textContent = msg;
 }
 
+function formatDebugInfo(resp) {
+  if (!resp) {
+    return "No debug data.";
+  }
+
+  const sections = [];
+  const actionPlan = resp.actionPlan || null;
+  if (actionPlan) {
+    sections.push(`Action plan:\n${JSON.stringify(actionPlan, null, 2)}`);
+  } else {
+    sections.push("Action plan:\n(none)");
+  }
+
+  const steps = resp.executionPlan?.steps || [];
+  if (!steps.length) {
+    sections.push("Navigator interactions (AX elements):\n(none)");
+    return sections.join("\n\n");
+  }
+
+  const axTree = resp.axTree || null;
+  const elements = Array.isArray(axTree?.elements) ? axTree.elements : [];
+  const elementsByBackendId = new Map(
+    elements.map((el) => [el.backend_node_id, el])
+  );
+
+  const lines = ["Navigator interactions (AX elements):"];
+  if (!axTree) {
+    lines.push("axTree missing; element lookups unavailable.");
+  }
+
+  steps.forEach((step, index) => {
+    lines.push(`${index + 1}. ${step.action_type} (step_id=${step.step_id})`);
+    lines.push(`   backend_node_id: ${step.backend_node_id ?? "n/a"}`);
+    if (step.value != null && step.value !== "") {
+      lines.push(`   value: ${step.value}`);
+    }
+    if (step.notes) {
+      lines.push(`   notes: ${step.notes}`);
+    }
+    if (step.confidence != null) {
+      lines.push(`   confidence: ${step.confidence}`);
+    }
+
+    const el = elementsByBackendId.get(step.backend_node_id);
+    if (!el) {
+      lines.push("   element: not found in axTree");
+      return;
+    }
+    lines.push(
+      `   element: role=${el.role || "unknown"} name=${el.name || "unnamed"}`
+    );
+    lines.push(`   ax_id: ${el.ax_id} | backend_node_id: ${el.backend_node_id}`);
+    if (el.description) {
+      lines.push(`   description: ${el.description}`);
+    }
+    if (el.value) {
+      lines.push(`   element_value: ${el.value}`);
+    }
+    lines.push(
+      `   state: focusable=${Boolean(el.focusable)} focused=${Boolean(
+        el.focused
+      )} disabled=${Boolean(el.disabled)} checked=${String(
+        el.checked
+      )} selected=${String(el.selected)} expanded=${String(el.expanded)}`
+    );
+  });
+
+  sections.push(lines.join("\n"));
+  return sections.join("\n\n");
+}
+
+function renderDebugInfo(resp) {
+  if (!debugOutputEl) {
+    return;
+  }
+  debugOutputEl.textContent = formatDebugInfo(resp);
+}
+
+function applyRunDemoResponse(resp) {
+  log(formatResponse(resp));
+  renderDebugInfo(resp);
+  if (!resp) {
+    console.log("Status: No response from extension");
+    return;
+  }
+  if (resp.status === "error") {
+    console.log("Status: Last run failed");
+    return;
+  }
+  if (resp.status === "needs_clarification") {
+    renderClarification(resp.actionPlan || resp.executionPlan || resp);
+    console.log("Status: Awaiting clarification");
+    return;
+  }
+  clearClarificationPanel();
+  console.log("Status: Completed successfully");
+}
+
+async function copyDebugOutput() {
+  if (!debugOutputEl) {
+    return;
+  }
+  const text = debugOutputEl.textContent || "";
+  if (!text.trim()) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    if (debugCopyButton) {
+      const original = debugCopyButton.textContent;
+      debugCopyButton.textContent = "Copied";
+      setTimeout(() => {
+        if (debugCopyButton) debugCopyButton.textContent = original || "Copy";
+      }, 1200);
+    }
+  } catch (err) {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "absolute";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+  }
+}
+
 const renderPopupClarificationHistory = () => {
   if (!clarificationHistoryContainer) {
     return;
@@ -581,22 +711,7 @@ function runDemo(transcriptInput, clarificationResponse = null) {
       clarificationHistory: clarificationStack,
     },
     (resp) => {
-      log(formatResponse(resp));
-      if (!resp) {
-        console.log("Status: No response from extension");
-        return;
-      }
-      if (resp.status === "error") {
-        console.log("Status: Last run failed");
-        return;
-      }
-      if (resp.status === "needs_clarification") {
-        renderClarification(resp.actionPlan || resp.executionPlan || resp);
-        console.log("Status: Awaiting clarification");
-        return;
-      }
-      clearClarificationPanel();
-      console.log("Status: Completed successfully");
+      applyRunDemoResponse(resp);
     }
   );
 }
@@ -682,6 +797,10 @@ if (resetClarificationButton) {
 
 renderPopupClarificationHistory();
 
+if (debugCopyButton) {
+  debugCopyButton.addEventListener("click", copyDebugOutput);
+}
+
 // Settings panel toggle
 if (settingsToggle && settingsContent && settingsChevron) {
   settingsToggle.addEventListener("click", () => {
@@ -698,4 +817,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     return;
   }
   refreshDebugRecordingFlag();
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "vcaa-run-demo-update" && message.payload) {
+    applyRunDemoResponse(message.payload);
+  }
 });
