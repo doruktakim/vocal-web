@@ -1,6 +1,6 @@
 # Vocal Web
 
-This repo implements Vocal Web, an extension that enables users to navigate the web using voice. An LLM is used for turning natural language into an action plan, while navigation and execution rely on strong heuristics. The goal is low-cost, local-friendly deployment first, with minimal LLM usage by default.
+This repo implements Vocal Web, an extension that enables users to navigate the web using voice. An LLM is used for turning natural language into an action plan, while navigation and execution rely on strong heuristics. The goal is low-cost, local-friendly deployment, with minimal LLM usage by default.
 
 ## Demos
 
@@ -48,3 +48,5 @@ https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
 - Currently creating my own dataset to further improve the element selection algorithms and create challenging tests. The use of language models in the navigator component will likely be reintroduced using a process-of-elimination approach once the selection algorithms are good enough to make it worth the additional cost/compute.
 - Will make <3B local open-source models available for increased privacy and free operation.
 
+## Accessibility Goals
+I started building this project in a hackathon with the idea that LLMs could help make the web more accesible, particularly for individuals who face challenges using traditional input devices like keyboards and mice. There is a really long way to go before this can be considered a true accessibility tool, but I'm very excited to keep building. If you have ideas or feedback, I’d love to hear from you.
