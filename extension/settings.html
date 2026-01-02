@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VCAA Settings</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="settings-shell">
+      <header class="settings-header">
+        <button id="backToMain" type="button" class="icon-btn" aria-label="Back to voice view">
+          ←
+        </button>
+        <div class="brand">
+          <img src="assets/logo-1.svg" alt="VCAA logo" class="brand-logo" />
+          <div class="brand-copy">
+            <span class="brand-title">Vocal</span>
+            <span class="brand-subtitle">Settings</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="section-heading">
+        <span class="settings-title">Connection</span>
+      </div>
+
+      <div class="settings-content">
+        <label class="input-group">
+          <span class="input-label">API Base</span>
+          <input id="apiBase" type="text" placeholder="http://localhost:8081" />
+        </label>
+
+        <div class="security-row">
+          <span
+            id="connectionSecurityStatus"
+            class="security-badge insecure"
+            role="status"
+            aria-live="polite"
+          >
+            <span class="security-icon">⚠️</span>
+            <span class="security-text">HTTP</span>
+          </span>
+          <label class="toggle-label">
+            <input id="requireHttps" type="checkbox" class="toggle-input" />
+            <span class="toggle-switch"></span>
+            <span class="toggle-text">Require HTTPS</span>
+          </label>
+        </div>
+
+        <div class="option-row">
+          <label class="toggle-label">
+            <input id="useAccessibilityTree" type="checkbox" class="toggle-input" />
+            <span class="toggle-switch"></span>
+            <span class="toggle-text">CDP Mode</span>
+          </label>
+          <span
+            id="axModeStatus"
+            class="info-badge"
+            title="Uses Chrome DevTools Protocol for element interaction"
+            >?</span
+          >
+        </div>
+
+        <label class="input-group">
+          <span class="input-label">API Key</span>
+          <div class="api-key-wrapper">
+            <input
+              id="apiKey"
+              type="password"
+              autocomplete="off"
+              placeholder="Enter your API key"
+            />
+            <button
+              id="toggleApiKeyVisibility"
+              type="button"
+              class="ghost-btn icon-only"
+              aria-pressed="false"
+            >
+              <span id="apiKeyToggleIcon">👁️</span>
+            </button>
+          </div>
+          <span id="apiKeyStatus" class="status-text status-missing">Not configured</span>
+        </label>
+      </div>
+    </main>
+    <script src="settings.js"></script>
+  </body>
+</html>

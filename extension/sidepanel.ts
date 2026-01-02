@@ -38,7 +38,20 @@ type HumanRecordingStatus = {
   enrolled_tabs?: number[];
 };
 
-const transcriptField = document.getElementById("transcript") as HTMLTextAreaElement | null;
+type AssistantState = "idle" | "listening" | "thinking" | "planning" | "executing" | "speaking";
+
+type StateProfile = {
+  label: string;
+  baseIntensity: number;
+  speed: number;
+  hue: number;
+  micGain: number;
+};
+
+const transcriptField = document.getElementById("transcript") as
+  | HTMLTextAreaElement
+  | HTMLInputElement
+  | null;
 const apiBaseField = document.getElementById("apiBase") as HTMLInputElement | null;
 const apiKeyField = document.getElementById("apiKey") as HTMLInputElement | null;
 const apiKeyStatus = document.getElementById("apiKeyStatus") as HTMLElement | null;
@@ -50,7 +63,7 @@ const securityText = connectionSecurityStatus?.querySelector(".security-text") a
 const requireHttpsToggle = document.getElementById("requireHttps") as HTMLInputElement | null;
 const useAccessibilityTreeToggle = document.getElementById("useAccessibilityTree") as HTMLInputElement | null;
 const axModeStatus = document.getElementById("axModeStatus") as HTMLElement | null;
-const outputEl = document.getElementById("output") as HTMLElement | null;
+const noticeEl = document.getElementById("notice") as HTMLElement | null;
 const debugOutputEl = document.getElementById("debugOutput") as HTMLElement | null;
 const debugCopyButton = document.getElementById("debugCopy") as HTMLButtonElement | null;
 const clarificationPanel = document.getElementById("clarificationPanel") as HTMLElement | null;
@@ -65,9 +78,9 @@ const humanRecPrompt = document.getElementById("humanRecPrompt") as HTMLInputEle
 const humanRecStart = document.getElementById("humanRecStart") as HTMLButtonElement | null;
 const humanRecStop = document.getElementById("humanRecStop") as HTMLButtonElement | null;
 const humanRecStatus = document.getElementById("humanRecStatus") as HTMLElement | null;
-const settingsToggle = document.getElementById("settingsToggle") as HTMLButtonElement | null;
-const settingsContent = document.getElementById("settingsContent") as HTMLElement | null;
-const settingsChevron = document.getElementById("settingsChevron") as HTMLElement | null;
+const openSettingsButton = document.getElementById("openSettings") as HTMLButtonElement | null;
+const statusText = document.getElementById("statusText") as HTMLElement | null;
+const voiceCanvas = document.getElementById("voiceCanvas") as HTMLCanvasElement | null;
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 const DEBUG_RECORDING_STORAGE_KEY = "DEBUG_RECORDING";
 let pendingClarification: ClarificationRequest | null = null;
@@ -82,6 +95,220 @@ const SpeechRecognition =
 let recognition: SpeechRecognition | null = null;
 let isListening = false;
 let microphonePermissionGranted = false;
+let pendingMicPermissionRequest: Promise<boolean> | null = null;
+
+const stateProfiles: Record<AssistantState, StateProfile> = {
+  idle: { label: "Idle...", baseIntensity: 0.08, speed: 0.55, hue: 24, micGain: 0.6 },
+  listening: { label: "Listening...", baseIntensity: 0.18, speed: 0.95, hue: 30, micGain: 1.4 },
+  thinking: { label: "Thinking...", baseIntensity: 0.12, speed: 0.7, hue: 18, micGain: 0.9 },
+  planning: { label: "Creating action plan...", baseIntensity: 0.14, speed: 0.65, hue: 16, micGain: 0.8 },
+  executing: { label: "Executing...", baseIntensity: 0.2, speed: 1.05, hue: 32, micGain: 1.1 },
+  speaking: { label: "Speaking...", baseIntensity: 0.22, speed: 1.1, hue: 34, micGain: 1.3 },
+};
+
+const assistantStates: AssistantState[] = [
+  "idle",
+  "listening",
+  "thinking",
+  "planning",
+  "executing",
+  "speaking",
+];
+
+const assistantStateTimings: Record<AssistantState, number> = {
+  idle: 3200,
+  listening: 4200,
+  thinking: 3400,
+  planning: 4200,
+  executing: 4000,
+  speaking: 3000,
+};
+
+let currentAssistantState: AssistantState = "idle";
+let autoStateEnabled = true;
+let autoStateTimer: number | null = null;
+
+const setAssistantState = (
+  state: AssistantState,
+  source: "auto" | "manual" = "manual"
+): void => {
+  currentAssistantState = state;
+  document.body.dataset.state = state;
+  if (statusText) {
+    statusText.textContent = stateProfiles[state].label;
+  }
+  if (source === "manual") {
+    autoStateEnabled = false;
+    if (autoStateTimer) {
+      window.clearTimeout(autoStateTimer);
+      autoStateTimer = null;
+    }
+  }
+};
+
+const startAutoStateCycle = (): void => {
+  if (!autoStateEnabled) {
+    return;
+  }
+  if (autoStateTimer) {
+    window.clearTimeout(autoStateTimer);
+  }
+  const delay = assistantStateTimings[currentAssistantState];
+  autoStateTimer = window.setTimeout(() => {
+    const nextIndex =
+      (assistantStates.indexOf(currentAssistantState) + 1) % assistantStates.length;
+    setAssistantState(assistantStates[nextIndex], "auto");
+    startAutoStateCycle();
+  }, delay);
+};
+
+let voiceCtx: CanvasRenderingContext2D | null = null;
+let canvasWidth = 0;
+let canvasHeight = 0;
+let baseRadius = 0;
+let micLevel = 0;
+let audioContext: AudioContext | null = null;
+let analyser: AnalyserNode | null = null;
+let dataArray: Uint8Array<ArrayBuffer> | null = null;
+let audioStream: MediaStream | null = null;
+
+const lerp = (start: number, end: number, amount: number): number =>
+  start + (end - start) * amount;
+
+const resizeVoiceCanvas = (): void => {
+  if (!voiceCanvas || !voiceCtx) {
+    return;
+  }
+  const rect = voiceCanvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  voiceCanvas.width = rect.width * dpr;
+  voiceCanvas.height = rect.height * dpr;
+  voiceCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  canvasWidth = rect.width;
+  canvasHeight = rect.height;
+  baseRadius = Math.min(canvasWidth, canvasHeight) * 0.28;
+};
+
+const initAudioMonitor = async (): Promise<void> => {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return;
+  }
+  if (audioContext && analyser) {
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+    return;
+  }
+  try {
+    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioContext = new AudioContext();
+    const source = audioContext.createMediaStreamSource(audioStream);
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.85;
+    dataArray = new Uint8Array(new ArrayBuffer(analyser.fftSize));
+    source.connect(analyser);
+  } catch (err) {
+    audioContext = null;
+    analyser = null;
+    dataArray = null;
+  }
+};
+
+const readMicLevel = (): number => {
+  if (!analyser || !dataArray) {
+    return 0;
+  }
+  analyser.getByteTimeDomainData(dataArray);
+  let sum = 0;
+  for (let i = 0; i < dataArray.length; i += 1) {
+    const value = (dataArray[i] - 128) / 128;
+    sum += value * value;
+  }
+  const rms = Math.sqrt(sum / dataArray.length);
+  return Math.min(1, rms * 1.8);
+};
+
+const drawBlob = (time: number): void => {
+  if (!voiceCtx) {
+    return;
+  }
+  const profile = stateProfiles[currentAssistantState];
+  const nextMic = readMicLevel();
+  micLevel = lerp(micLevel, nextMic, 0.08);
+  const intensity = profile.baseIntensity + micLevel * profile.micGain;
+  const t = time * 0.001 * profile.speed;
+
+  voiceCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const points = 140;
+
+  voiceCtx.beginPath();
+  for (let i = 0; i <= points; i += 1) {
+    const angle = (i / points) * Math.PI * 2;
+    const wobble =
+      Math.sin(angle * 3 + t * 1.4) * 0.5 +
+      Math.sin(angle * 5 - t * 0.9) * 0.3 +
+      Math.sin(angle * 2 + t * 0.4) * 0.2;
+    const radius = baseRadius * (1 + wobble * (0.12 + intensity * 0.35));
+    const x = centerX + Math.cos(angle) * radius;
+    const y = centerY + Math.sin(angle) * radius;
+    if (i === 0) {
+      voiceCtx.moveTo(x, y);
+    } else {
+      voiceCtx.lineTo(x, y);
+    }
+  }
+  voiceCtx.closePath();
+
+  const gradient = voiceCtx.createRadialGradient(
+    centerX,
+    centerY,
+    baseRadius * 0.2,
+    centerX,
+    centerY,
+    baseRadius * 1.35
+  );
+  gradient.addColorStop(0, `hsla(${profile.hue}, 55%, 72%, ${0.35 + intensity * 0.2})`);
+  gradient.addColorStop(1, `hsla(${profile.hue}, 40%, 58%, 0.08)`);
+
+  voiceCtx.fillStyle = gradient;
+  voiceCtx.fill();
+
+  voiceCtx.lineWidth = 1.2 + intensity * 1.2;
+  voiceCtx.strokeStyle = `hsla(${profile.hue}, 50%, 45%, ${0.28 + intensity * 0.2})`;
+  voiceCtx.shadowColor = `hsla(${profile.hue}, 55%, 60%, ${0.2 + intensity * 0.3})`;
+  voiceCtx.shadowBlur = 18 + intensity * 28;
+  voiceCtx.stroke();
+};
+
+const animateVoice = (time: number): void => {
+  drawBlob(time);
+  requestAnimationFrame(animateVoice);
+};
+
+const setupVoiceVisualization = (): void => {
+  if (!voiceCanvas) {
+    return;
+  }
+  voiceCtx = voiceCanvas.getContext("2d");
+  if (!voiceCtx) {
+    return;
+  }
+  resizeVoiceCanvas();
+  window.addEventListener("resize", resizeVoiceCanvas);
+  requestAnimationFrame(animateVoice);
+  document.addEventListener("pointerdown", () => {
+    void initAudioMonitor();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      void initAudioMonitor();
+    }
+  });
+};
 
 const isValidApiKey = (value: string): boolean => API_KEY_PATTERN.test((value || "").trim());
 
@@ -200,7 +427,7 @@ function updateMicButtonLabel(text: string | null = null): void {
     if (micToggleText) micToggleText.textContent = "Stop";
     micToggle.classList.add("listening");
   } else {
-    if (micToggleText) micToggleText.textContent = "Cancel";
+    if (micToggleText) micToggleText.textContent = "Listen";
     micToggle.classList.remove("listening");
   }
 }
@@ -242,12 +469,14 @@ function ensureRecognition(): SpeechRecognition | null {
     isListening = false;
     awaitingClarificationResponse = false;
     updateMicButtonLabel();
+    setAssistantState("idle");
   };
   recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
     log(`Speech recognition error: ${event.error || "unknown"}`);
     isListening = false;
     awaitingClarificationResponse = false;
     updateMicButtonLabel();
+    setAssistantState("idle");
   };
 
   return recognition;
@@ -261,6 +490,15 @@ async function requestMicrophoneAccess(): Promise<boolean> {
   if (microphonePermissionGranted) {
     return true;
   }
+  const permissionState = await getMicrophonePermissionState();
+  if (permissionState === "granted") {
+    microphonePermissionGranted = true;
+    return true;
+  }
+  if (permissionState === "denied") {
+    log("Microphone access is blocked in Chrome settings for this extension.");
+    return false;
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach((track) => track.stop());
@@ -268,9 +506,107 @@ async function requestMicrophoneAccess(): Promise<boolean> {
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (shouldRequestMicrophoneViaPopup(err, message, permissionState)) {
+      log("Microphone permission must be granted in a separate window. Opening request...");
+      const granted = await requestMicrophoneAccessViaPopup();
+      if (granted) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach((track) => track.stop());
+          microphonePermissionGranted = true;
+          return true;
+        } catch (retryErr) {
+          const retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          log(`Microphone access denied: ${retryMessage}`);
+          return false;
+        }
+      }
+      return false;
+    }
     log(`Microphone access denied: ${message}`);
     return false;
   }
+}
+
+async function getMicrophonePermissionState(): Promise<PermissionState | null> {
+  if (!navigator.permissions?.query) {
+    return null;
+  }
+  try {
+    const status = await navigator.permissions.query({
+      name: "microphone" as PermissionName,
+    });
+    return status.state;
+  } catch {
+    return null;
+  }
+}
+
+function shouldRequestMicrophoneViaPopup(
+  err: unknown,
+  message: string,
+  permissionState: PermissionState | null
+): boolean {
+  if (permissionState === "denied") {
+    return false;
+  }
+  if (permissionState === "prompt") {
+    return true;
+  }
+  const errName = err instanceof DOMException ? err.name : "";
+  return errName === "NotAllowedError" && /dismissed|prompt|denied/i.test(message);
+}
+
+function requestMicrophoneAccessViaPopup(): Promise<boolean> {
+  if (pendingMicPermissionRequest) {
+    return pendingMicPermissionRequest;
+  }
+  pendingMicPermissionRequest = new Promise<boolean>((resolve) => {
+    const popupUrl = chrome.runtime.getURL("mic-permission.html");
+    const popup = window.open(
+      popupUrl,
+      "vcaa-mic-permission",
+      "popup,width=420,height=380"
+    );
+    if (!popup) {
+      log("Pop-up blocked. Allow pop-ups to enable the microphone.");
+      resolve(false);
+      return;
+    }
+
+    const cleanup = (result: boolean): void => {
+      window.removeEventListener("message", onMessage);
+      window.clearInterval(closeCheck);
+      window.clearTimeout(timeout);
+      pendingMicPermissionRequest = null;
+      resolve(result);
+    };
+
+    const onMessage = (event: MessageEvent): void => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+      const data = event.data as { type?: string; granted?: boolean };
+      if (data?.type !== "vcaa-mic-permission") {
+        return;
+      }
+      cleanup(Boolean(data.granted));
+    };
+
+    const closeCheck = window.setInterval(() => {
+      if (popup.closed) {
+        cleanup(false);
+      }
+    }, 400);
+
+    const timeout = window.setTimeout(() => {
+      cleanup(false);
+    }, 60_000);
+
+    window.addEventListener("message", onMessage);
+    popup.focus();
+  });
+  return pendingMicPermissionRequest;
 }
 
 const isClarificationRequest = (value: unknown): value is ClarificationRequest => {
@@ -311,6 +647,7 @@ const speakClarification = (text: string): Promise<void> => {
   if (!text || !window.speechSynthesis) {
     return Promise.resolve();
   }
+  setAssistantState("speaking");
   return new Promise<void>((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.onend = () => resolve();
@@ -325,6 +662,7 @@ const startClarificationListening = async (): Promise<void> => {
   }
   awaitingClarificationResponse = true;
   log("Listening for clarification...");
+  setAssistantState("listening");
   if (!SpeechRecognition) {
     awaitingClarificationResponse = false;
     return;
@@ -366,6 +704,7 @@ async function toggleListening(): Promise<void> {
     recognizer.stop();
     isListening = false;
     updateMicButtonLabel("Stopping...");
+    setAssistantState("idle");
     return;
   }
   const granted = await requestMicrophoneAccess();
@@ -376,6 +715,8 @@ async function toggleListening(): Promise<void> {
   try {
     isListening = true;
     updateMicButtonLabel();
+    setAssistantState("listening");
+    void initAudioMonitor();
     recognizer.start();
     log("Listening...");
   } catch (err) {
@@ -386,11 +727,34 @@ async function toggleListening(): Promise<void> {
   }
 }
 
+let noticeTimer: number | null = null;
+
 function log(msg: string): void {
-  if (!outputEl) {
+  if (!noticeEl) {
     return;
   }
-  outputEl.textContent = msg;
+  const text = msg?.trim() || "";
+  if (!text) {
+    noticeEl.textContent = "";
+    noticeEl.hidden = true;
+    if (noticeTimer) {
+      window.clearTimeout(noticeTimer);
+      noticeTimer = null;
+    }
+    return;
+  }
+  noticeEl.textContent = text;
+  noticeEl.hidden = false;
+  const persistent = /error|failed|clarification|denied/i.test(text);
+  if (noticeTimer) {
+    window.clearTimeout(noticeTimer);
+  }
+  if (!persistent) {
+    noticeTimer = window.setTimeout(() => {
+      noticeEl.hidden = true;
+      noticeTimer = null;
+    }, 4000);
+  }
 }
 
 function formatDebugInfo(resp: DebugPayload | null | undefined): string {
@@ -492,16 +856,27 @@ function applyRunDemoResponse(resp: RunDemoResponse | null | undefined): void {
   }
   if (!resp) {
     console.log("Status: No response from extension");
+    setAssistantState("idle");
     return;
   }
   if (resp.status === "error") {
     console.log("Status: Last run failed");
+    setAssistantState("idle");
     return;
   }
   if (resp.status === "needs_clarification") {
     renderClarification(getClarificationCandidate(resp));
     console.log("Status: Awaiting clarification");
+    setAssistantState("listening");
     return;
+  }
+  if (resp.status === "navigating") {
+    clearClarificationPanel();
+    setAssistantState("executing");
+    return;
+  }
+  if (resp.status === "ok" || resp.status === "success" || resp.status === "completed") {
+    setAssistantState("idle");
   }
   clearClarificationPanel();
   console.log("Status: Completed successfully");
@@ -812,6 +1187,7 @@ function runDemo(transcriptInput: string = "", clarificationResponse: string | n
     return;
   }
   console.log("Status: Requesting action plan...");
+  setAssistantState("planning");
   if (!clarificationResponse) {
     clarificationStack = [];
   } else if (lastClarificationQuestion) {
@@ -835,6 +1211,15 @@ function runDemo(transcriptInput: string = "", clarificationResponse: string | n
 if (runButton) {
   runButton.addEventListener("click", () => {
     runDemo();
+  });
+}
+
+if (transcriptField) {
+  transcriptField.addEventListener("keydown", (event: KeyboardEvent) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      runDemo();
+    }
   });
 }
 
@@ -909,6 +1294,9 @@ if (humanRecStop) {
   });
 }
 
+setupVoiceVisualization();
+setAssistantState("idle", "auto");
+startAutoStateCycle();
 updateMicButtonLabel();
 loadConfig();
 refreshDebugRecordingFlag();
@@ -928,10 +1316,9 @@ if (debugCopyButton) {
 }
 
 // Settings panel toggle
-if (settingsToggle && settingsContent && settingsChevron) {
-  settingsToggle.addEventListener("click", () => {
-    const isCollapsed = settingsContent.classList.toggle("collapsed");
-    settingsChevron.classList.toggle("collapsed", isCollapsed);
+if (openSettingsButton) {
+  openSettingsButton.addEventListener("click", () => {
+    window.location.href = "settings.html";
   });
 }
 

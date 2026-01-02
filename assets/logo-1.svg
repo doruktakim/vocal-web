@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+        
+            <defs>
+                <clipPath id="clip-shape">
+                    <rect width="100%" height="100%" rx="60" ry="60" />
+                </clipPath>
+            </defs>
+        
+		<defs>
+			
+		</defs>
+        <g clip-path="url(#clip-shape)">
+            
+			<defs>
+				<radialGradient id="bg-radial" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+					<stop offset="0%" stop-color="#bababa" /><stop offset="100%" stop-color="#ffc6b3" />
+				</radialGradient>
+			</defs>
+			<rect width="100%" height="100%" fill="url(#bg-radial)" />
+		
+			
+				<defs>
+					
+			<pattern id="bg-pattern" x="0" y="0" width="100%" height="2" patternUnits="userSpaceOnUse">
+				<line x1="0" y1="0" x2="100%" y2="0" stroke="#000000" stroke-width="1" />
+			</pattern>
+		
+				</defs>
+				<rect width="100%" height="100%" fill="url(#bg-pattern)" opacity="0.03" />
+			
+            <g transform="translate(256, 256) scale(6.666666666666667) rotate(0) translate(-24, -24)" opacity="1" >
+					<title xmlns="" stroke="#bc7134">arcticons:voice</title>
+<path xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#bc7134" stroke-linecap="round" stroke-linejoin="round" d="M24 45.5A21.5 21.5 0 1 1 45.5 24A21.51 21.51 0 0 1 24 45.5"/>
+<path xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#bc7134" stroke-linecap="round" stroke-linejoin="round" d="M4.75 14.4A7.1 7.1 0 0 1 9 13.09c8.44 0 7.91 22 18.09 22c8.82 0 8.31-18.09 16.63-19.77"/>
+<path xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#bc7134" stroke-linecap="round" stroke-linejoin="round" d="M5.23 13.51c6.52 3 6.84 21.58 16.18 21.58S29.66 15.2 39.33 15.2a6.87 6.87 0 0 1 5.17 2.3"/>
+				</g>
+        </g>
+    </svg>

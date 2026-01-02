@@ -434,10 +434,7 @@ async function finishAgentRecording(traceId: string, endedReason: string): Promi
   }
   recorder.recording.ended_at = new Date().toISOString();
   recorder.recording.summary.ended_reason = endedReason || "completed";
-  await downloadRecording(
-    recorder.recording,
-    `${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`
-  );
+  await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
   agentRecorders.delete(traceId);
 }
 

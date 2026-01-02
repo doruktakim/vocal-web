@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VCAA Voice</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="voice-shell" aria-live="polite">
+      <header class="brand">
+        <img src="assets/logo-1.svg" alt="VCAA logo" class="brand-logo" />
+        <span class="brand-name">Vocal</span>
+      </header>
+
+      <section class="orb-stage" aria-hidden="true">
+        <canvas id="voiceCanvas" class="voice-canvas"></canvas>
+      </section>
+
+      <div class="status-row">
+        <span id="statusText" class="status-text">Idle...</span>
+      </div>
+
+      <div class="input-shell">
+        <input
+          id="manualInput"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Type a command"
+          aria-label="Manual command"
+        />
+      </div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

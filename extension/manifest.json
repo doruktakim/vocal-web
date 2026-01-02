@@ -17,7 +17,8 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "VCAA"
+    "default_title": "VCAA",
+    "default_popup": "popup.html"
   },
   "side_panel": {
     "default_path": "sidepanel.html"

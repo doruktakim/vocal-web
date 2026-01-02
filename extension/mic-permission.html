@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Enable microphone</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="voice-shell">
+      <header class="voice-header">
+        <div class="brand">
+          <img src="assets/logo-1.svg" alt="VCAA logo" class="brand-logo" />
+          <div class="brand-copy">
+            <span class="brand-title">Vocal</span>
+            <span class="brand-subtitle">Microphone access</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="permission-card">
+        <h1 class="permission-title">Enable microphone</h1>
+        <p class="permission-copy">
+          Chrome does not show the permission prompt inside the side panel. Click below to grant
+          access for this extension.
+        </p>
+        <div class="control-row">
+          <button id="requestMic" class="ghost-btn ghost-btn-primary" type="button">
+            Allow microphone
+          </button>
+        </div>
+        <div id="permissionStatus" class="notice" role="status" aria-live="polite" hidden></div>
+      </section>
+    </main>
+    <script src="mic-permission.js"></script>
+  </body>
+</html>

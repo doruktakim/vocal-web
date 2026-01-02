@@ -1,0 +1,134 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap");
+
+:root {
+  --color-bg: #f5f0e8;
+  --color-ink: rgba(61, 52, 40, 0.72);
+  --color-ink-muted: rgba(61, 52, 40, 0.5);
+  --color-accent: rgba(197, 83, 45, 0.75);
+  --color-accent-soft: rgba(197, 83, 45, 0.18);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 420px;
+  font-family: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-ink);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.45), transparent 45%),
+    radial-gradient(circle at 80% 30%, rgba(197, 83, 45, 0.08), transparent 55%);
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.voice-shell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+  padding: 18px 16px 14px;
+  height: 100%;
+}
+
+.brand {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--color-ink-muted);
+}
+
+.brand-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  box-shadow: 0 8px 18px rgba(61, 52, 40, 0.12);
+}
+
+.brand-name {
+  font-weight: 500;
+}
+
+.orb-stage {
+  width: 100%;
+  display: grid;
+  place-items: center;
+  margin-top: 10px;
+}
+
+.voice-canvas {
+  width: 240px;
+  height: 240px;
+  filter: drop-shadow(0 16px 28px rgba(61, 52, 40, 0.15));
+}
+
+.status-row {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.status-text {
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  color: var(--color-ink-muted);
+}
+
+.input-shell {
+  width: 100%;
+  margin-top: auto;
+  display: flex;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 200ms ease, transform 220ms ease;
+}
+
+.input-shell:focus-within {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#manualInput {
+  width: 100%;
+  max-width: 280px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--color-ink);
+  font-size: 13px;
+  outline: none;
+  box-shadow: 0 10px 24px rgba(61, 52, 40, 0.12);
+}
+
+#manualInput::placeholder {
+  color: rgba(61, 52, 40, 0.38);
+}
+
+#manualInput:focus {
+  box-shadow: 0 12px 28px rgba(61, 52, 40, 0.18), 0 0 0 2px var(--color-accent-soft);
+}
+
+@media (max-width: 360px) {
+  .voice-canvas {
+    width: 210px;
+    height: 210px;
+  }
+}

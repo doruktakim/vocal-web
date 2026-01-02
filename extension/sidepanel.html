@@ -2,139 +2,65 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VCAA</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main>
-      <header class="app-header">
-        <h1 class="app-title">VCAA</h1>
+    <main class="voice-shell">
+      <header class="voice-header">
+        <div class="brand">
+          <img src="assets/logo-1.svg" alt="VCAA logo" class="brand-logo" />
+          <div class="brand-copy">
+            <span class="brand-title">Vocal</span>
+            <span class="brand-subtitle">Voice navigation</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="openSettings" type="button" class="icon-btn" aria-label="Open settings">
+            ⚙
+          </button>
+          <button id="micToggle" type="button" class="ghost-btn" aria-live="polite">
+            <span class="btn-text">Listen</span>
+          </button>
+        </div>
       </header>
 
-      <section class="card">
-        <label class="input-group">
-          <span class="input-label">Goal</span>
-          <textarea
-            id="transcript"
-            rows="3"
-            placeholder="Show me cheap flights from Istanbul to NYC on January 25"
-          ></textarea>
-        </label>
-
-        <div class="button-group">
-          <button id="run" class="btn btn-primary">
-            <span class="btn-text">Start Task</span>
-          </button>
-          <button id="micToggle" type="button" class="btn btn-secondary" aria-live="polite">
-            <span class="btn-text">Cancel</span>
-          </button>
-        </div>
+      <section class="orb-stage" aria-hidden="true">
+        <canvas id="voiceCanvas" class="voice-canvas"></canvas>
       </section>
 
-      <section class="card card-settings">
-        <div class="settings-header" id="settingsToggle">
-          <span class="settings-icon">⚙️</span>
-          <span>Settings</span>
-          <span class="chevron" id="settingsChevron">▼</span>
-        </div>
+      <div class="status-row">
+        <span id="statusText" class="status-text">Idle...</span>
+      </div>
 
-        <div class="settings-content" id="settingsContent">
-          <label class="input-group">
-            <span class="input-label">API Base</span>
-            <input id="apiBase" type="text" placeholder="http://localhost:8081" />
-          </label>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
-          <div class="security-row">
-            <span
-              id="connectionSecurityStatus"
-              class="security-badge insecure"
-              role="status"
-              aria-live="polite"
-            >
-              <span class="security-icon">⚠️</span>
-              <span class="security-text">HTTP</span>
-            </span>
-            <label class="toggle-label">
-              <input id="requireHttps" type="checkbox" class="toggle-input" />
-              <span class="toggle-switch"></span>
-              <span class="toggle-text">Require HTTPS</span>
-            </label>
-          </div>
+      <div class="control-row">
+        <button id="run" class="ghost-btn ghost-btn-primary" type="button">
+          <span class="btn-text">Send</span>
+        </button>
+      </div>
 
-          <div class="option-row">
-            <label class="toggle-label">
-              <input id="useAccessibilityTree" type="checkbox" class="toggle-input" />
-              <span class="toggle-switch"></span>
-              <span class="toggle-text">CDP Mode</span>
-            </label>
-            <span id="axModeStatus" class="info-badge" title="Uses Chrome DevTools Protocol for element interaction">?</span>
-          </div>
+      <div class="input-shell">
+        <input
+          id="transcript"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Type a command"
+        />
+      </div>
 
-          <label class="input-group">
-            <span class="input-label">API Key</span>
-            <div class="api-key-wrapper">
-              <input
-                id="apiKey"
-                type="password"
-                autocomplete="off"
-                placeholder="Enter your API key"
-              />
-              <button id="toggleApiKeyVisibility" type="button" class="btn-icon-only" aria-pressed="false">
-                <span id="apiKeyToggleIcon">👁️</span>
-              </button>
-            </div>
-            <span id="apiKeyStatus" class="status-text status-missing">Not configured</span>
-          </label>
-        </div>
-      </section>
-
-      <section class="card" id="clarificationCard" style="display: none;">
-        <div class="section-header">
-          <span>💬</span>
+      <section class="aux-section" id="clarificationCard" style="display: none;">
+        <div class="section-heading">
           <span>Clarification</span>
         </div>
         <div id="clarificationPanel" role="status" aria-live="polite"></div>
         <div id="clarificationHistory" class="clarification-history"></div>
-        <button id="resetClarification" type="button" class="btn btn-ghost btn-sm">
+        <button id="resetClarification" type="button" class="ghost-btn small">
           Reset clarifications
         </button>
-      </section>
-
-      <section class="card card-output">
-        <div class="section-header">
-          <span>📋</span>
-          <span>Output</span>
-        </div>
-        <pre id="output"></pre>
-      </section>
-
-      <section class="card card-debug">
-        <div class="section-header">
-          <span>🐞</span>
-          <span>Debug</span>
-          <button id="debugCopy" type="button" class="btn btn-ghost btn-sm">Copy</button>
-        </div>
-        <pre id="debugOutput" class="debug-output">No debug data yet.</pre>
-      </section>
-
-      <section class="card axrec-section" id="axrecSection">
-        <div class="section-header">
-          <span>🔴</span>
-          <span>Human AX Recording</span>
-        </div>
-        <label class="input-group">
-          <span class="input-label">Example prompt</span>
-          <input
-            id="humanRecPrompt"
-            type="text"
-            placeholder="Describe the example task"
-          />
-        </label>
-        <div class="button-group">
-          <button id="humanRecStart" type="button" class="btn btn-secondary btn-sm">Start Recording</button>
-          <button id="humanRecStop" type="button" class="btn btn-danger btn-sm">Stop Recording</button>
-        </div>
-        <div id="humanRecStatus" class="recording-status">Recording: OFF | Tabs: 0</div>
       </section>
     </main>
     <script src="sidepanel.js"></script>
