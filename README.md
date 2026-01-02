@@ -8,10 +8,6 @@ This repo implements Vocal Web, an extension that enables users to navigate the 
 
 https://github.com/user-attachments/assets/e4956020-8b3a-42d5-973c-4812ec565db9
 
-#### Voice Input = "I want to buy a monitor. Can you search for it on eBay?"
-
-https://github.com/user-attachments/assets/3633d980-1348-4186-a2fe-9ad8bafdb308
-
 #### Text Input = "Search for the Wikipedia article on The French Revolution"
 
 https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
