@@ -73,26 +73,7 @@
     }
   };
 
-  const states: AssistantState[] = [
-    "idle",
-    "listening",
-    "thinking",
-    "planning",
-    "executing",
-    "speaking"
-  ];
-
-  const stateTimings: Record<AssistantState, number> = {
-    idle: 3200,
-    listening: 4800,
-    thinking: 3400,
-    planning: 4200,
-    executing: 4200,
-    speaking: 3000
-  };
-
   let currentState: AssistantState = "idle";
-  let stateIndex = 0;
 
   const setState = (state: AssistantState): void => {
     currentState = state;
@@ -102,14 +83,6 @@
     }
   };
 
-  const scheduleNextState = (): void => {
-    const delay = stateTimings[states[stateIndex]];
-    window.setTimeout(() => {
-      stateIndex = (stateIndex + 1) % states.length;
-      setState(states[stateIndex]);
-      scheduleNextState();
-    }, delay);
-  };
 
   let baseRadius = 0;
   let canvasWidth = 0;
@@ -258,7 +231,6 @@
   });
 
   setState(currentState);
-  scheduleNextState();
   enableInputShortcut();
   void initMic();
   requestAnimationFrame(animate);

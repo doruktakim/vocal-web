@@ -106,60 +106,14 @@ const stateProfiles: Record<AssistantState, StateProfile> = {
   speaking: { label: "Speaking...", baseIntensity: 0.22, speed: 1.1, hue: 34, micGain: 1.3 },
 };
 
-const assistantStates: AssistantState[] = [
-  "idle",
-  "listening",
-  "thinking",
-  "planning",
-  "executing",
-  "speaking",
-];
-
-const assistantStateTimings: Record<AssistantState, number> = {
-  idle: 3200,
-  listening: 4200,
-  thinking: 3400,
-  planning: 4200,
-  executing: 4000,
-  speaking: 3000,
-};
-
 let currentAssistantState: AssistantState = "idle";
-let autoStateEnabled = true;
-let autoStateTimer: number | null = null;
 
-const setAssistantState = (
-  state: AssistantState,
-  source: "auto" | "manual" = "manual"
-): void => {
+const setAssistantState = (state: AssistantState): void => {
   currentAssistantState = state;
   document.body.dataset.state = state;
   if (statusText) {
     statusText.textContent = stateProfiles[state].label;
   }
-  if (source === "manual") {
-    autoStateEnabled = false;
-    if (autoStateTimer) {
-      window.clearTimeout(autoStateTimer);
-      autoStateTimer = null;
-    }
-  }
-};
-
-const startAutoStateCycle = (): void => {
-  if (!autoStateEnabled) {
-    return;
-  }
-  if (autoStateTimer) {
-    window.clearTimeout(autoStateTimer);
-  }
-  const delay = assistantStateTimings[currentAssistantState];
-  autoStateTimer = window.setTimeout(() => {
-    const nextIndex =
-      (assistantStates.indexOf(currentAssistantState) + 1) % assistantStates.length;
-    setAssistantState(assistantStates[nextIndex], "auto");
-    startAutoStateCycle();
-  }, delay);
 };
 
 let voiceCtx: CanvasRenderingContext2D | null = null;
@@ -431,6 +385,39 @@ function updateMicButtonLabel(text: string | null = null): void {
     micToggle.classList.remove("listening");
   }
 }
+
+const isEditableTarget = (target: EventTarget | null): boolean => {
+  const el = target as HTMLElement | null;
+  if (!el) {
+    return false;
+  }
+  if (el.isContentEditable) {
+    return true;
+  }
+  const tagName = el.tagName?.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select";
+};
+
+const isListenShortcut = (event: KeyboardEvent): boolean => {
+  if (event.defaultPrevented || event.repeat) {
+    return false;
+  }
+  if (!event.shiftKey || !(event.ctrlKey || event.metaKey)) {
+    return false;
+  }
+  return event.key.toLowerCase() === "l";
+};
+
+const handleListenShortcut = (event: KeyboardEvent): void => {
+  if (!isListenShortcut(event)) {
+    return;
+  }
+  if (isEditableTarget(event.target) || micToggle?.disabled) {
+    return;
+  }
+  event.preventDefault();
+  void toggleListening();
+};
 
 function ensureRecognition(): SpeechRecognition | null {
   if (!SpeechRecognition) {
@@ -1227,6 +1214,8 @@ if (micToggle) {
   micToggle.addEventListener("click", toggleListening);
 }
 
+document.addEventListener("keydown", handleListenShortcut);
+
 if (apiKeyField) {
   apiKeyField.addEventListener("input", (event: Event) => {
     const target = event.target as HTMLInputElement | null;
@@ -1295,8 +1284,7 @@ if (humanRecStop) {
 }
 
 setupVoiceVisualization();
-setAssistantState("idle", "auto");
-startAutoStateCycle();
+setAssistantState("idle");
 updateMicButtonLabel();
 loadConfig();
 refreshDebugRecordingFlag();

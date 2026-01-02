@@ -165,14 +165,7 @@ async function cdpExecuteStep(
       case "scroll": {
         const direction = String(value || "down").toLowerCase();
         const delta = direction === "up" ? -700 : 700;
-        const { x, y } = await getViewportCenterViaCDP(tabId);
-        await sendCDPCommand(tabId, "Input.dispatchMouseEvent", {
-          type: "mouseWheel",
-          x,
-          y,
-          deltaX: 0,
-          deltaY: delta,
-        });
+        await cdpSmoothScroll(tabId, delta);
         break;
       }
       case "history_back":

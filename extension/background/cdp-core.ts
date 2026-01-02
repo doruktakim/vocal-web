@@ -88,6 +88,54 @@ async function getViewportCenterViaCDP(tabId: number): Promise<{ x: number; y: n
   return { x: 10, y: 10 };
 }
 
+/**
+ * Dispatch a smooth wheel scroll by spreading the delta across multiple ticks.
+ * @param {number} tabId
+ * @param {number} deltaY - Total scroll delta in pixels.
+ * @param {object} options
+ */
+async function cdpSmoothScroll(
+  tabId: number,
+  deltaY: number,
+  options: { steps?: number; stepDelayMs?: number } = {}
+): Promise<void> {
+  if (!Number.isFinite(deltaY) || deltaY === 0) {
+    return;
+  }
+  const steps = Math.max(1, Math.round(options.steps ?? 12));
+  const stepDelayMs = Math.max(0, Math.round(options.stepDelayMs ?? 12));
+  const { x, y } = await getViewportCenterViaCDP(tabId);
+  const deltaSteps: number[] = [];
+  let total = 0;
+  // Use an ease-in-out curve so the scroll starts/ends gently.
+  for (let i = 0; i < steps; i += 1) {
+    const t0 = i / steps;
+    const t1 = (i + 1) / steps;
+    const p0 = 0.5 * (1 - Math.cos(Math.PI * t0));
+    const p1 = 0.5 * (1 - Math.cos(Math.PI * t1));
+    const stepDelta = (p1 - p0) * deltaY;
+    deltaSteps.push(stepDelta);
+    total += stepDelta;
+  }
+  // Adjust final step to preserve exact total delta.
+  if (deltaSteps.length) {
+    deltaSteps[deltaSteps.length - 1] += deltaY - total;
+  }
+
+  for (let i = 0; i < deltaSteps.length; i += 1) {
+    await sendCDPCommand(tabId, "Input.dispatchMouseEvent", {
+      type: "mouseWheel",
+      x,
+      y,
+      deltaX: 0,
+      deltaY: deltaSteps[i],
+    });
+    if (stepDelayMs > 0 && i < deltaSteps.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, stepDelayMs));
+    }
+  }
+}
+
 // Handle debugger detach events
 chrome.debugger.onDetach.addListener((source: { tabId?: number }, reason: string) => {
   if (source.tabId) {

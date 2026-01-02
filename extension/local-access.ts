@@ -451,10 +451,45 @@ const toggleListening = async (): Promise<void> => {
   }
 };
 
+const isEditableTarget = (target: EventTarget | null): boolean => {
+  const el = target as HTMLElement | null;
+  if (!el) {
+    return false;
+  }
+  if (el.isContentEditable) {
+    return true;
+  }
+  const tagName = el.tagName?.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select";
+};
+
+const isListenShortcut = (event: KeyboardEvent): boolean => {
+  if (event.defaultPrevented || event.repeat) {
+    return false;
+  }
+  if (!event.shiftKey || !(event.ctrlKey || event.metaKey)) {
+    return false;
+  }
+  return event.key.toLowerCase() === "l";
+};
+
+const handleListenShortcut = (event: KeyboardEvent): void => {
+  if (!isListenShortcut(event)) {
+    return;
+  }
+  if (isEditableTarget(event.target) || micButton?.disabled) {
+    return;
+  }
+  event.preventDefault();
+  void toggleListening();
+};
+
 if (micButton) {
   micButton.addEventListener("click", toggleListening);
 }
 updateMicButtonLabel();
+
+document.addEventListener("keydown", handleListenShortcut);
 
 const requestActionPlan = async (
   prompt: string,

@@ -282,14 +282,7 @@ async function executeFastCommandViaCDP(
     case "scroll": {
       await attachDebugger(tabId);
       const delta = action?.direction === "up" ? -700 : 700;
-      const { x, y } = await getViewportCenterViaCDP(tabId);
-      await sendCDPCommand(tabId, "Input.dispatchMouseEvent", {
-        type: "mouseWheel",
-        x,
-        y,
-        deltaX: 0,
-        deltaY: delta,
-      });
+      await cdpSmoothScroll(tabId, delta);
       return { status: "success", action_type: type };
     }
     case "scroll_to": {

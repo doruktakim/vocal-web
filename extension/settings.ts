@@ -15,9 +15,6 @@
   const securityIcon = connectionSecurityStatus?.querySelector(".security-icon") as HTMLElement | null;
   const securityText = connectionSecurityStatus?.querySelector(".security-text") as HTMLElement | null;
   const requireHttpsToggle = document.getElementById("requireHttps") as HTMLInputElement | null;
-  const useAccessibilityTreeToggle = document.getElementById(
-    "useAccessibilityTree"
-  ) as HTMLInputElement | null;
   const backToMain = document.getElementById("backToMain") as HTMLButtonElement | null;
   const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
 
@@ -182,11 +179,6 @@
 
   if (requireHttpsToggle) {
     requireHttpsToggle.addEventListener("change", handleRequireHttpsToggle);
-  }
-
-  if (useAccessibilityTreeToggle) {
-    useAccessibilityTreeToggle.checked = true;
-    useAccessibilityTreeToggle.disabled = true;
   }
 
   if (backToMain) {
