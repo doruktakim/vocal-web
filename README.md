@@ -9,7 +9,7 @@ This repository implements the MVP of Vocal Web, an extension that enables users
 - Folder summaries: `**/SUMMARY.md`
 
 ## Quickstart
-1. Install Python deps: `pip install -r requirements.txt`.
+1. Install Python deps with uv: `uv sync` (creates a local `.venv`).
 2. Configure LLM API key. The agents fall back to deterministic heuristics without a valid key. Select asi1-mini as the model, which is currently free and performs great!
 ```bash
    export ASI_CLOUD_API_URL="https://inference.asicloud.cudos.org/v1"
@@ -29,7 +29,7 @@ This repository implements the MVP of Vocal Web, an extension that enables users
    export VCAA_API_KEY="paste_the_key_here"
    ```
 5. Run `mkcert -install && mkcert localhost 127.0.0.1 ::1` for locally trusted certificates, then point `SSL_KEYFILE`/`SSL_CERTFILE` at the generated files. See `docs/security/tls-setup.md` for more information.
-6. Start the HTTP API bridge: `python3 -m agents.api_server` (defaults to port `8081`).
+6. Start the HTTP API bridge: `uv run python -m agents.api_server` (defaults to port `8081`).
 7. Install JS tooling and build the extension bundle:
    ```bash
    npm install

@@ -1,0 +1,15 @@
+[project]
+name = "vocal-web"
+version = "0.1.0"
+description = "Vocal Web browser extension backend and tooling"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi==0.124.4",
+  "uvicorn==0.38.0",
+  "httpx==0.28.1",
+  "python-dotenv==1.2.1",
+  "python-dateutil==2.9.0",
+  "openai==2.11.0",
+  "google-cloud-speech==2.34.0",
+  "pytest==9.0.2",
+]

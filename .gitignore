@@ -8,6 +8,7 @@ __pycache__/
 *$py.class
 env/
 venv/
+.venv/
 pip-log.txt
 pip-delete-this-directory.txt
 *.egg-info/
