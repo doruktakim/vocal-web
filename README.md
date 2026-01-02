@@ -49,4 +49,4 @@ https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
 - Will make <3B local open-source models available for increased privacy and free operation.
 
 ## Accessibility Goals
-I started building this project in a hackathon with the idea that LLMs could help make the web more accesible, particularly for individuals who face challenges using traditional input devices like keyboards and mice. There is a really long way to go before this can be considered a true accessibility tool, but I'm very excited to keep building. If you have ideas or feedback, I’d love to hear from you.
+- We started building this project in a hackathon with the idea that LLMs could help make the web more accesible, particularly for individuals who face challenges using traditional input devices like keyboards and mice. There is a really long way to go before this can be considered a true accessibility tool, but I'm very excited to keep building. If you have ideas or feedback, I’d love to hear from you.
