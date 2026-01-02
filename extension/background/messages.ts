@@ -8,6 +8,9 @@ type RuntimeMessage = {
   clarificationResponse?: string | null;
   clarificationHistory?: ClarificationHistoryEntry[];
   prompt_text?: string;
+  prompt_index?: number;
+  prompt_id?: string;
+  prompt_set_id?: string;
   apiBase?: string;
   traceId?: string;
   step?: ExecutionStep;
@@ -44,8 +47,7 @@ chrome.runtime.onMessage.addListener(
   if (message?.type === "vw-human-rec-start") {
     (async () => {
       if (!isDebugRecordingEnabled()) {
-        sendResponse({ status: "error", error: "DEBUG_RECORDING is not enabled." });
-        return;
+        await setDebugRecordingEnabled(true);
       }
       const promptText = (message.prompt_text || "").trim();
       if (!promptText) {
@@ -59,10 +61,17 @@ chrome.runtime.onMessage.addListener(
           session_id: humanRecordingState.sessionId,
           enrolled_tabs: Array.from(humanRecordingState.enrolledTabs),
           started_at: humanRecordingState.startedAt,
+          prompt_index: humanRecordingState.promptIndex,
+          prompt_set_id: humanRecordingState.promptSetId,
         });
         return;
       }
       const sessionId = crypto.randomUUID();
+      const promptIndex = Number.isFinite(Number(message.prompt_index))
+        ? Number(message.prompt_index)
+        : null;
+      const promptId = message.prompt_id || null;
+      const promptSetId = message.prompt_set_id || null;
       humanRecordingState = {
         active: true,
         sessionId,
@@ -74,8 +83,17 @@ chrome.runtime.onMessage.addListener(
         }),
         enrolledTabs: new Set(),
         promptText,
+        promptIndex,
+        promptId,
+        promptSetId,
         startedAt: new Date().toISOString(),
+        lastAxTrees: new Map<number, AxTree>(),
       };
+      if (humanRecordingState.recording?.prompt) {
+        humanRecordingState.recording.prompt.index = promptIndex;
+        humanRecordingState.recording.prompt.id = promptId;
+        humanRecordingState.recording.prompt.set_id = promptSetId;
+      }
       await persistHumanRecording(humanRecordingState.recording);
       await persistHumanActiveState();
 
@@ -92,6 +110,8 @@ chrome.runtime.onMessage.addListener(
         session_id: sessionId,
         enrolled_tabs: Array.from(humanRecordingState.enrolledTabs),
         started_at: humanRecordingState.startedAt,
+        prompt_index: promptIndex,
+        prompt_set_id: promptSetId,
       });
     })();
     return true;
@@ -99,7 +119,7 @@ chrome.runtime.onMessage.addListener(
 
   if (message?.type === "vw-human-rec-stop") {
     (async () => {
-      if (!isDebugRecordingEnabled()) {
+      if (!isDebugRecordingEnabled() && !humanRecordingState.active) {
         sendResponse({ status: "error", error: "DEBUG_RECORDING is not enabled." });
         return;
       }
@@ -116,7 +136,7 @@ chrome.runtime.onMessage.addListener(
   }
 
   if (message?.type === "vw-human-rec-status") {
-    if (!isDebugRecordingEnabled()) {
+    if (!isDebugRecordingEnabled() && !humanRecordingState.active) {
       sendResponse({ status: "ok", active: false, enrolled_tabs: [], started_at: null });
       return true;
     }
@@ -126,6 +146,8 @@ chrome.runtime.onMessage.addListener(
       session_id: humanRecordingState.sessionId,
       enrolled_tabs: Array.from(humanRecordingState.enrolledTabs),
       started_at: humanRecordingState.startedAt,
+      prompt_index: humanRecordingState.promptIndex,
+      prompt_set_id: humanRecordingState.promptSetId,
     });
     return true;
   }
@@ -142,8 +164,8 @@ chrome.runtime.onMessage.addListener(
         return;
       }
       await ensureDebuggerAttached(tabId);
-      const axTree = await captureHumanSnapshotForTab(tabId);
       const payload = message.payload as HumanActionPayload;
+      const axTree = await captureHumanSnapshotForTab(tabId, payload?.event_id);
       const target = await resolveHumanActionTarget(tabId, payload, axTree);
       await appendHumanAction(payload, target, tabId);
       sendResponse({ status: "ok" });

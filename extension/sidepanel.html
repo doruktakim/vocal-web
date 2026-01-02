@@ -122,17 +122,20 @@
           <span>🔴</span>
           <span>Human AX Recording</span>
         </div>
-        <label class="input-group">
-          <span class="input-label">Example prompt</span>
-          <input
-            id="humanRecPrompt"
-            type="text"
-            placeholder="Describe the example task"
-          />
-        </label>
+        <div class="prompt-nav">
+          <button id="humanPromptPrev" type="button" class="btn-icon-only" aria-label="Previous prompt">&larr;</button>
+          <div id="humanPromptIndex" class="prompt-index">Prompt 1 of 200</div>
+          <button id="humanPromptNext" type="button" class="btn-icon-only" aria-label="Next prompt">&rarr;</button>
+        </div>
+        <div class="prompt-card" id="humanPromptCard">
+          <div class="prompt-label-row">
+            <div class="prompt-label">Current prompt</div>
+            <div id="humanPromptRecorded" class="prompt-tag" aria-hidden="true">Recorded</div>
+          </div>
+          <div id="humanPromptText" class="prompt-text"></div>
+        </div>
         <div class="button-group">
-          <button id="humanRecStart" type="button" class="btn btn-secondary btn-sm">Start Recording</button>
-          <button id="humanRecStop" type="button" class="btn btn-danger btn-sm">Stop Recording</button>
+          <button id="humanRecToggle" type="button" class="btn btn-secondary btn-sm">Start Recording</button>
         </div>
         <div id="humanRecStatus" class="recording-status">Recording: OFF | Tabs: 0</div>
       </section>

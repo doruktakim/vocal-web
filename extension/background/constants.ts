@@ -21,6 +21,7 @@ const AX_RECORDING_STORAGE_KEYS = {
   HUMAN_ACTIVE: "axrec_human:active",
   HUMAN_PREFIX: "axrec_human:",
 };
+const HUMAN_RECORDED_PROMPTS_KEY = "vwHumanRecordedPrompts";
 const AX_CAPTURE_CONTEXT = {
   method: "Accessibility.getFullAXTree",
   notes: "CDP Accessibility.getFullAXTree depth=15",

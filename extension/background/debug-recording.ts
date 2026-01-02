@@ -20,7 +20,14 @@ type Recording = {
   id: string;
   created_at: string;
   ended_at: string | null;
-  prompt: { type: string; text: string; locale: string };
+  prompt: {
+    type: string;
+    text: string;
+    locale: string;
+    id?: string | null;
+    index?: number | null;
+    set_id?: string | null;
+  };
   context: { extension_version: string; ax_capture: { method: string; notes: string } };
   timeline: RecordingEntry[];
   summary: RecordingSummary;
@@ -34,7 +41,11 @@ type HumanRecordingState = {
   recording: Recording | null;
   enrolledTabs: Set<number>;
   promptText: string;
+  promptIndex: number | null;
+  promptId: string | null;
+  promptSetId: string | null;
   startedAt: string | null;
+  lastAxTrees: Map<number, AxTree>;
 };
 
 type AxSnapshot = {
@@ -80,7 +91,11 @@ let humanRecordingState: HumanRecordingState = {
   recording: null,
   enrolledTabs: new Set<number>(),
   promptText: "",
+  promptIndex: null,
+  promptId: null,
+  promptSetId: null,
   startedAt: null,
+  lastAxTrees: new Map<number, AxTree>(),
 };
 
 const isDebugRecordingEnabled = (): boolean => debugRecordingEnabled;
@@ -211,9 +226,11 @@ async function persistRecording(key: string, recording: Recording): Promise<void
 
 function buildDownloadFilename(mode: string, id: string): string {
   const stamp = formatRecordingTimestamp(new Date());
-  return mode === "agent"
-    ? `vw-ax-agent-${id}-${stamp}.json`
-    : `vw-ax-human-${id}-${stamp}.json`;
+  const baseName =
+    mode === "agent"
+      ? `vw-ax-agent-${id}-${stamp}.json`
+      : `vw-ax-human-${id}-${stamp}.json`;
+  return `VocalWeb/recordings/${baseName}`;
 }
 
 async function downloadRecording(recording: Recording, storageKey: string): Promise<boolean> {
@@ -235,6 +252,18 @@ async function downloadRecording(recording: Recording, storageKey: string): Prom
       resolve(true);
     });
   });
+}
+
+async function persistRecordingToDocuments(recording: Recording): Promise<boolean> {
+  try {
+    const { apiBase } = await resolveApiConfig();
+    const mode = recording?.mode === "agent" ? "agent" : "human";
+    await authorizedRequest(apiBase, `/api/recordings/${mode}`, { recording }, false);
+    return true;
+  } catch (err) {
+    console.warn("[VCAA] Failed to persist recording to Documents folder", err);
+    return false;
+  }
 }
 
 async function getAgentRecorder(traceId: string): Promise<AgentRecorder | null> {
@@ -434,10 +463,13 @@ async function finishAgentRecording(traceId: string, endedReason: string): Promi
   }
   recorder.recording.ended_at = new Date().toISOString();
   recorder.recording.summary.ended_reason = endedReason || "completed";
-  await downloadRecording(
-    recorder.recording,
-    `${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`
-  );
+  const storageKey = `${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`;
+  const saved = await persistRecordingToDocuments(recorder.recording);
+  if (!saved) {
+    await downloadRecording(recorder.recording, storageKey);
+  } else {
+    await chrome.storage.session.remove([storageKey]);
+  }
   agentRecorders.delete(traceId);
 }
 
@@ -450,10 +482,48 @@ async function persistHumanActiveState(): Promise<void> {
     [AX_RECORDING_STORAGE_KEYS.HUMAN_ACTIVE]: {
       session_id: humanRecordingState.sessionId,
       prompt_text: humanRecordingState.promptText,
+      prompt_index: humanRecordingState.promptIndex,
+      prompt_id: humanRecordingState.promptId,
+      prompt_set_id: humanRecordingState.promptSetId,
       started_at: humanRecordingState.startedAt,
       enrolled_tabs: Array.from(humanRecordingState.enrolledTabs),
     },
   });
+}
+
+function resolveRecordedPromptId(
+  promptId: string | null,
+  promptSetId: string | null,
+  promptIndex: number | null
+): string | null {
+  if (promptId) {
+    return promptId;
+  }
+  if (!promptSetId || !Number.isFinite(promptIndex)) {
+    return null;
+  }
+  return `${promptSetId}-${String((promptIndex as number) + 1).padStart(3, "0")}`;
+}
+
+async function markPromptRecorded(
+  promptId: string | null,
+  promptSetId: string | null,
+  promptIndex: number | null
+): Promise<void> {
+  const resolved = resolveRecordedPromptId(promptId, promptSetId, promptIndex);
+  if (!resolved) {
+    return;
+  }
+  const stored = await chrome.storage.local.get([HUMAN_RECORDED_PROMPTS_KEY]);
+  const existing = stored[HUMAN_RECORDED_PROMPTS_KEY];
+  const list = Array.isArray(existing)
+    ? existing.filter((value) => typeof value === "string" && value.trim())
+    : [];
+  if (list.includes(resolved)) {
+    return;
+  }
+  list.push(resolved);
+  await chrome.storage.local.set({ [HUMAN_RECORDED_PROMPTS_KEY]: list });
 }
 
 async function getHumanRecording(): Promise<Recording | null> {
@@ -491,6 +561,30 @@ async function appendHumanAxSnapshot(axTree: AxSnapshot, tabId: number): Promise
     url: axTree?.page_url || null,
     tab_id: tabId,
     snapshot: axTree,
+  };
+  appendTimelineEntry(recording, entry);
+  await persistHumanRecording(recording);
+}
+
+async function appendHumanAxDiff(
+  axDiff: AxDiff,
+  tabId: number,
+  stepId?: string
+): Promise<void> {
+  const recording = await getHumanRecording();
+  if (!recording || !axDiff) {
+    return;
+  }
+  if (stepId && !axDiff.step_id) {
+    axDiff.step_id = stepId;
+  }
+  const entry = {
+    t: new Date().toISOString(),
+    kind: "ax_diff",
+    url: axDiff?.page_url || null,
+    tab_id: tabId ?? null,
+    step_id: stepId ?? null,
+    diff: axDiff,
   };
   appendTimelineEntry(recording, entry);
   await persistHumanRecording(recording);
@@ -626,13 +720,22 @@ async function enrollHumanTab(tabId: number): Promise<void> {
   await setHumanRecordingEnabled(tabId, true);
 }
 
-async function captureHumanSnapshotForTab(tabId: number): Promise<AxSnapshot | null> {
+async function captureHumanSnapshotForTab(
+  tabId: number,
+  stepId?: string
+): Promise<AxSnapshot | null> {
   if (!isDebugRecordingEnabled() || !humanRecordingState.active || !tabId) {
     return null;
   }
   try {
+    const prevTree = humanRecordingState.lastAxTrees.get(tabId) || null;
     const axTree = await collectAccessibilityTree(tabId, humanRecordingState.sessionId);
     await appendHumanAxSnapshot(axTree, tabId);
+    if (prevTree) {
+      const axDiff = diffAXTrees(prevTree, axTree);
+      await appendHumanAxDiff(axDiff, tabId, stepId);
+    }
+    humanRecordingState.lastAxTrees.set(tabId, axTree);
     return axTree;
   } catch (err) {
     console.warn("[VCAA] Failed to capture human AX snapshot", err);
@@ -644,6 +747,9 @@ async function stopHumanRecording(activeTabId?: number): Promise<{ status: strin
   if (!humanRecordingState.active || !humanRecordingState.sessionId) {
     return { status: "error", error: "No active human recording session." };
   }
+  const promptId = humanRecordingState.promptId;
+  const promptSetId = humanRecordingState.promptSetId;
+  const promptIndex = humanRecordingState.promptIndex;
   if (activeTabId) {
     await captureHumanSnapshotForTab(activeTabId);
   }
@@ -651,19 +757,27 @@ async function stopHumanRecording(activeTabId?: number): Promise<{ status: strin
   if (recording) {
     recording.ended_at = new Date().toISOString();
     recording.summary.ended_reason = "stopped";
-    await downloadRecording(
-      recording,
-      `${AX_RECORDING_STORAGE_KEYS.HUMAN_PREFIX}${humanRecordingState.sessionId}`
-    );
+    const storedKey = `${AX_RECORDING_STORAGE_KEYS.HUMAN_PREFIX}${humanRecordingState.sessionId}`;
+    const saved = await persistRecordingToDocuments(recording);
+    if (!saved) {
+      await downloadRecording(recording, storedKey);
+    } else {
+      await chrome.storage.session.remove([storedKey]);
+    }
   }
+  await markPromptRecorded(promptId, promptSetId, promptIndex);
   const enrolledTabs = Array.from(humanRecordingState.enrolledTabs);
   humanRecordingState = {
     active: false,
     sessionId: null,
     recording: null,
-        enrolledTabs: new Set<number>(),
+    enrolledTabs: new Set<number>(),
     promptText: "",
+    promptIndex: null,
+    promptId: null,
+    promptSetId: null,
     startedAt: null,
+    lastAxTrees: new Map<number, AxTree>(),
   };
   await chrome.storage.session.remove([AX_RECORDING_STORAGE_KEYS.HUMAN_ACTIVE]);
   for (const tabId of enrolledTabs as number[]) {
@@ -685,8 +799,27 @@ async function loadHumanRecordingState(): Promise<void> {
   humanRecordingState.active = true;
   humanRecordingState.sessionId = activeState.session_id;
   humanRecordingState.promptText = activeState.prompt_text || "";
+  humanRecordingState.promptIndex = Number.isFinite(Number(activeState.prompt_index))
+    ? Number(activeState.prompt_index)
+    : null;
+  humanRecordingState.promptId = activeState.prompt_id || null;
+  humanRecordingState.promptSetId = activeState.prompt_set_id || null;
   humanRecordingState.startedAt = activeState.started_at || null;
   humanRecordingState.enrolledTabs = new Set<number>(activeState.enrolled_tabs || []);
+  humanRecordingState.lastAxTrees = new Map<number, AxTree>();
+  const recording = await getHumanRecording();
+  if (recording?.timeline?.length) {
+    for (const entry of recording.timeline) {
+      if (entry?.kind !== "ax_snapshot") {
+        continue;
+      }
+      const tabId = entry?.tab_id;
+      const snapshot = entry?.snapshot as AxTree | undefined;
+      if (typeof tabId === "number" && Number.isFinite(tabId) && snapshot) {
+        humanRecordingState.lastAxTrees.set(tabId, snapshot);
+      }
+    }
+  }
   for (const tabId of humanRecordingState.enrolledTabs) {
     await setHumanRecordingEnabled(tabId, true);
   }

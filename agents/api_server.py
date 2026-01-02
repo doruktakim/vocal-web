@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -97,6 +98,44 @@ app.add_middleware(
 asi_client = ASIClient()
 
 
+def _resolve_recordings_dir() -> Path:
+    override = os.getenv("VCAA_RECORDINGS_DIR", "").strip()
+    if override:
+        path = Path(override).expanduser()
+    else:
+        path = Path.home() / "Documents" / "VocalWeb" / "recordings"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _safe_filename(value: str) -> str:
+    sanitized = "".join(ch for ch in value if ch.isalnum() or ch in {"-", "_"})
+    return sanitized.strip("-_") or "recording"
+
+
+def _format_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+
+def _save_recording(recording: Dict[str, Any], prefix: str) -> Dict[str, Any]:
+    recording_id = _safe_filename(str(recording.get("id") or "unknown"))
+    timestamp = _format_timestamp()
+    filename = f"{prefix}-{recording_id}-{timestamp}.json"
+    directory = _resolve_recordings_dir()
+    target = directory / filename
+    counter = 1
+    while target.exists():
+        target = directory / f"{prefix}-{recording_id}-{timestamp}-{counter}.json"
+        counter += 1
+    with target.open("w", encoding="utf-8") as handle:
+        json.dump(jsonable_encoder(recording), handle, ensure_ascii=False, indent=2)
+    return {
+        "status": "saved",
+        "recording_id": recording_id,
+        "path": str(target),
+    }
+
+
 @app.get("/health")
 async def health() -> Dict[str, Any]:
     return {"status": "ok"}
@@ -146,6 +185,26 @@ async def ax_navigator_endpoint(body: AXNavigationRequest):
 async def execution_feedback(feedback: ExecutionFeedback):
     logger.info("Execution feedback: %s", feedback.json())
     return {"status": "received", "trace_id": feedback.trace_id}
+
+
+@app.post("/api/recordings/human", dependencies=[Depends(verify_api_key)])
+async def save_human_recording(payload: Dict[str, Any]):
+    recording = payload.get("recording") if isinstance(payload, dict) else None
+    if recording is None:
+        recording = payload
+    if not isinstance(recording, dict):
+        raise HTTPException(status_code=400, detail="Recording payload must be an object.")
+    return _save_recording(recording, "vw-ax-human")
+
+
+@app.post("/api/recordings/agent", dependencies=[Depends(verify_api_key)])
+async def save_agent_recording(payload: Dict[str, Any]):
+    recording = payload.get("recording") if isinstance(payload, dict) else None
+    if recording is None:
+        recording = payload
+    if not isinstance(recording, dict):
+        raise HTTPException(status_code=400, detail="Recording payload must be an object.")
+    return _save_recording(recording, "vw-ax-agent")
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
