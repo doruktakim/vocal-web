@@ -41,7 +41,8 @@ https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
 11. Test the extension by using it on an active webpage.
 
 ## Security
-See `docs/security/tls-setup.md` for TLS/HTTPS setup and operational security guidance.
+- See `docs/security/tls-setup.md` for TLS/HTTPS setup and operational security guidance.
+- This tool automates multi-step browser actions and may interact with logged-in accounts, modify data, or take unintended actions. Prompt injection or malicious web content may influence its behavior. Using a sandboxed environment for safety is recommended. **Use at your own discretion.**
 
 ## Next steps
 - Currently creating my own dataset to further improve the element selection algorithms and create challenging tests. The use of language models in the navigator component will likely be reintroduced using a process-of-elimination approach once the selection algorithms are good enough to make it worth the additional cost/compute.
