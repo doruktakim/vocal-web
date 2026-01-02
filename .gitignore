@@ -40,6 +40,8 @@ yarn.lock
 # Local environment secrets/logs
 .env
 *.env
+.envrc
+.direnv/
 *.log
 extension/*.log
 dev/*.log
