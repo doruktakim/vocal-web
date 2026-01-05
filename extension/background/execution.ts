@@ -481,6 +481,10 @@ async function runDemoFlowInternalAX(
       clarificationHistory
     );
 
+    if (actionPlan.schema_version !== "clarification_v1") {
+      await appendAgentActionPlan(traceId, actionPlan as ActionPlan, tabId);
+    }
+
     if (actionPlan.schema_version === "clarification_v1") {
       await finishAgentRecording(traceId, "clarification");
       if (shouldAskHumanClarification(actionPlan as ClarificationRequest)) {

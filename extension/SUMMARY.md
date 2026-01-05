@@ -8,6 +8,7 @@ Chrome extension that captures user intent, talks to the agent API, and executes
 - `settings.html` + `settings.js` manage connection settings and the debug recording toggle for saving AX recordings to Downloads/VocalWeb/recordings.
 - `popup.html` + `popup.js` deliver the voice-centric action popup with the canvas orb, mic-reactive animation, and status text.
 - `background.js` is the service worker orchestrator: it manages API calls, CDP attachment, AX tree capture, plan execution, and navigation resume.
+- `background/debug-recording.js` captures AX recordings (now including interpreter action plans) and downloads completed agent/human recordings when the debug toggle is enabled.
 - `content.js` records human actions (AX recording mode) and filters sensitive fields.
 - `local-access.html` + `local-access.js` provide a standalone local UI outside the extension context.
 - `styles.css` defines the shared UI styling for the side panel.

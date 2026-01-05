@@ -11,6 +11,7 @@ type RecordingEntry = {
   url?: string;
   snapshot?: { page_url?: string };
   diff?: { page_url?: string };
+  action_plan?: ActionPlan;
   [key: string]: unknown;
 };
 
@@ -200,6 +201,9 @@ function appendTimelineEntry(recording: Recording, entry: RecordingEntry): void 
     recording.summary.action_count += 1;
     addUrlToSummary(recording, entry.url);
   }
+  if (entry.kind === "action_plan") {
+    addUrlToSummary(recording, entry.url);
+  }
   if (entry.kind === "navigation") {
     addUrlToSummary(recording, entry.url);
   }
@@ -384,6 +388,22 @@ async function appendAgentAxDiff(
 
 globalThis.appendAgentAxDiff = appendAgentAxDiff;
 
+async function appendAgentActionPlan(traceId: string, actionPlan: ActionPlan, tabId: number): Promise<void> {
+  const recorder = await getAgentRecorder(traceId);
+  if (!recorder || !actionPlan) {
+    return;
+  }
+  const entry = {
+    t: new Date().toISOString(),
+    kind: "action_plan",
+    url: actionPlan?.entities?.url || null,
+    tab_id: tabId ?? null,
+    action_plan: actionPlan,
+  };
+  appendTimelineEntry(recorder.recording, entry);
+  await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
+}
+
 async function appendAgentDecisions(
   traceId: string,
   executionPlan: ExecutionPlan,
@@ -466,9 +486,11 @@ async function finishAgentRecording(traceId: string, endedReason: string): Promi
   if (!recorder) {
     return;
   }
+  const storageKey = `${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`;
   recorder.recording.ended_at = new Date().toISOString();
   recorder.recording.summary.ended_reason = endedReason || "completed";
-  await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);
+  await persistRecording(storageKey, recorder.recording);
+  await downloadRecording(recorder.recording, storageKey);
   agentRecorders.delete(traceId);
 }
 
