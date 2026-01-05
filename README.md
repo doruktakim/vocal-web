@@ -1,6 +1,6 @@
 # Vocal Web
 
-This repo implements Vocal Web, an extension that enables users to navigate the web using voice. An LLM is used for turning natural language into an action plan, while navigation and execution rely on strong heuristics. The goal is low-cost, local-friendly deployment, with minimal LLM usage by default.
+Vocal Web is a voice-controlled browser extension that allows users to navigate and interact with the web using natural language. It combines an LLM for translating natural language commands into high-level action plans with lightweight, heuristic-based execution for fast and reliable interactions. The system is designed to minimize LLM usage to reduce latency and cost while maintaining high performance.
 
 ## Demos
 
