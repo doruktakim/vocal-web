@@ -1,6 +1,6 @@
 # Vocal Web
 
-Vocal Web is a voice-controlled browser extension that allows users to navigate and interact with the web using natural language. It combines an LLM for translating natural language commands into high-level action plans with lightweight, heuristic-based execution for fast and reliable interactions. The system is designed to minimize LLM usage to reduce latency and cost while maintaining high performance.
+Vocal Web is a voice-controlled browser extension that allows users to navigate and interact with the web using natural language. It combines an LLM for translating natural language commands into high-level action plans with lightweight, heuristic-based execution for fast and reliable interactions. The system is designed to minimize LLM usage to reduce latency and cost while maintaining high performance. Browsing is intuitive and blazing fast compared to compute-heavy alternatives like Claude in Chrome, although some performance is sacrificed in return.
 
 ## Demos
 
@@ -57,4 +57,4 @@ https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
 - Will make <3B local open-source models available for increased privacy and free operation.
 
 ## Accessibility Goals
-- We started building this project in a hackathon with the idea that LLMs could help make the web more accesible, particularly for individuals who face challenges using traditional input devices like keyboards and mice. There is a really long way to go before this can be considered a true accessibility tool, but I'm very excited to keep building. If you have ideas or feedback, I’d love to hear from you.
+- We started building this project in a hackathon with the idea that LLMs could help make the web more accesible, particularly for individuals who face challenges using traditional input devices like keyboards and mice. There is a really long way to go before this can be considered a true accessibility tool as there is still large performance improvements needed, but I'm very excited to keep building. If you have ideas or feedback, I’d love to hear from you.
