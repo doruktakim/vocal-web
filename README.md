@@ -8,6 +8,10 @@ Vocal Web is a voice-controlled browser extension that allows users to navigate 
 
 https://github.com/user-attachments/assets/e4956020-8b3a-42d5-973c-4812ec565db9
 
+#### Voice Input = "I want to watch a Dwarkesh podcast video."
+
+https://github.com/user-attachments/assets/179b0453-33a9-4215-bc7b-48d3d339eca5
+
 #### Text Input = "Search for the Wikipedia article on The French Revolution"
 
 https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
