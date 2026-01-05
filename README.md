@@ -6,7 +6,7 @@ Vocal Web is a voice-controlled browser extension that allows users to navigate 
 
 #### Voice Input = "Show me cheap flights from Istanbul to New York on January 30th"
 
-https://github.com/user-attachments/assets/e4956020-8b3a-42d5-973c-4812ec565db9
+https://github.com/user-attachments/assets/cf39d935-31b1-4938-9aaa-a894add88cb3
 
 #### Voice Demo: Buying a speaker on eBay
 
