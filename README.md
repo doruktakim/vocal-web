@@ -1,6 +1,6 @@
 # Vocal Web
 
-Vocal Web is a voice-controlled browser extension that allows users to navigate and interact with the web using natural language. It combines an LLM for translating natural language commands into high-level action plans with lightweight, heuristic-based execution for fast and reliable interactions. The system is designed to minimize LLM usage to reduce latency and cost while maintaining high performance. Browsing is intuitive and blazing fast compared to compute-heavy alternatives like Claude in Chrome, although some performance is sacrificed in return.
+Vocal Web is a voice-controlled browser extension that allows users to navigate and interact with the web using natural language. It combines an LLM for translating natural language commands into high-level action plans with lightweight, heuristic-based execution for fast and reliable interactions. Browsing is intuitive and blazing fast compared to compute-heavy alternatives like Claude in Chrome, although some performance is naturally sacrificed in return.
 
 ## Demos
 
