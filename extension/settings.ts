@@ -15,8 +15,10 @@
   const securityIcon = connectionSecurityStatus?.querySelector(".security-icon") as HTMLElement | null;
   const securityText = connectionSecurityStatus?.querySelector(".security-text") as HTMLElement | null;
   const requireHttpsToggle = document.getElementById("requireHttps") as HTMLInputElement | null;
+  const debugRecordingToggle = document.getElementById("debugRecording") as HTMLInputElement | null;
   const backToMain = document.getElementById("backToMain") as HTMLButtonElement | null;
   const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
+  const DEBUG_RECORDING_STORAGE_KEY = "DEBUG_RECORDING";
 
   const isValidApiKey = (value: string): boolean => API_KEY_PATTERN.test((value || "").trim());
 
@@ -141,8 +143,13 @@
 
   function loadConfig(): void {
     chrome.storage.sync.get(
-      ["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps"],
-      (result: { vcaaApiBase?: string; vcaaApiKey?: string; vcaaRequireHttps?: boolean }) => {
+      ["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps", DEBUG_RECORDING_STORAGE_KEY],
+      (result: {
+        vcaaApiBase?: string;
+        vcaaApiKey?: string;
+        vcaaRequireHttps?: boolean;
+        DEBUG_RECORDING?: string;
+      }) => {
         if (apiBaseField && result.vcaaApiBase) {
           apiBaseField.value = result.vcaaApiBase;
         }
@@ -156,6 +163,9 @@
         }
         if (requireHttpsToggle) {
           requireHttpsToggle.checked = Boolean(result.vcaaRequireHttps);
+        }
+        if (debugRecordingToggle) {
+          debugRecordingToggle.checked = String(result.DEBUG_RECORDING || "").trim() === "1";
         }
       }
     );
@@ -179,6 +189,14 @@
 
   if (requireHttpsToggle) {
     requireHttpsToggle.addEventListener("change", handleRequireHttpsToggle);
+  }
+
+  if (debugRecordingToggle) {
+    debugRecordingToggle.addEventListener("change", (event: Event) => {
+      const target = event?.target as HTMLInputElement | null;
+      const enabled = Boolean(target?.checked);
+      chrome.storage.sync.set({ [DEBUG_RECORDING_STORAGE_KEY]: enabled ? "1" : "0" });
+    });
   }
 
   if (backToMain) {

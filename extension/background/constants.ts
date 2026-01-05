@@ -23,7 +23,7 @@ const AX_RECORDING_STORAGE_KEYS = {
 };
 const AX_CAPTURE_CONTEXT = {
   method: "Accessibility.getFullAXTree",
-  notes: "CDP Accessibility.getFullAXTree depth=15",
+  notes: "CDP Accessibility.getFullAXTree depth=20",
 };
 
 // ============================================================================

@@ -211,9 +211,42 @@ async function persistRecording(key: string, recording: Recording): Promise<void
 
 function buildDownloadFilename(mode: string, id: string): string {
   const stamp = formatRecordingTimestamp(new Date());
-  return mode === "agent"
+  const base = mode === "agent"
     ? `vw-ax-agent-${id}-${stamp}.json`
     : `vw-ax-human-${id}-${stamp}.json`;
+  return `VocalWeb/recordings/${base}`;
+}
+
+function summarizeAxSnapshot(axTree: AxSnapshot | null | undefined): {
+  element_count: number;
+  role_counts: Record<string, number>;
+  tab_names: string[];
+  video_matches: string[];
+} {
+  const elements = Array.isArray(axTree?.elements) ? axTree.elements : [];
+  const role_counts: Record<string, number> = {};
+  const tabNames = new Set<string>();
+  const videoMatches = new Set<string>();
+  for (const el of elements) {
+    const role = String(el?.role || "").toLowerCase() || "unknown";
+    role_counts[role] = (role_counts[role] || 0) + 1;
+    const name = String(el?.name || "").trim();
+    if (!name) {
+      continue;
+    }
+    if (role === "tab") {
+      tabNames.add(name);
+    }
+    if (name.toLowerCase().includes("video")) {
+      videoMatches.add(name);
+    }
+  }
+  return {
+    element_count: elements.length,
+    role_counts,
+    tab_names: Array.from(tabNames).slice(0, 10),
+    video_matches: Array.from(videoMatches).slice(0, 10),
+  };
 }
 
 async function downloadRecording(recording: Recording, storageKey: string): Promise<boolean> {
@@ -319,6 +352,7 @@ async function appendAgentAxSnapshot(
     url: axTree?.page_url || null,
     tab_id: tabId,
     snapshot: axTree,
+    summary: summarizeAxSnapshot(axTree),
   };
   appendTimelineEntry(recorder.recording, entry);
   await persistRecording(`${AX_RECORDING_STORAGE_KEYS.AGENT_PREFIX}${traceId}`, recorder.recording);

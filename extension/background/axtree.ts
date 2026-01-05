@@ -10,7 +10,7 @@ async function getAccessibilityTree(tabId: number): Promise<unknown[]> {
     await sendCDPCommand(tabId, "Accessibility.enable");
     // Get the full accessibility tree with depth limit for performance
     const result = (await sendCDPCommand(tabId, "Accessibility.getFullAXTree", {
-      depth: 15, // Limit depth to avoid huge trees
+      depth: 20, // Limit depth to avoid huge trees
     })) as any;
     return result?.nodes || [];
   } catch (err) {
