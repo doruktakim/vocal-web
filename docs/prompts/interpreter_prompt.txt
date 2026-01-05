@@ -24,6 +24,13 @@ Common actions (non-exhaustive; choose the closest fit):
 - `input` / `fill_form`: type text into a specified field (login, email, search box, filters).
 - `search_flights`, `search_hotels`: travel-specific intents (origin/destination/dates). Attach the chosen platform URL.
 
+Rule for `click_result`:
+- Use `click_result` only when the user explicitly specifies an ordinal/position (first/second/third/last or a number).
+- Do not infer position from descriptive phrasing; use `click` with a descriptive target instead.
+
+Rule for `click`:
+- Put the descriptive phrase directly in `target` (e.g., "video with Karpathy"); avoid putting it only in `value`.
+
 When a clarification response exists, treat it as an extension of the transcript and avoid re-asking the same question.
 Entity hints:
 - `site`, `url`, `query`, `position`, `scroll_direction`, `origin`, `destination`, `date`, `date_start`, `date_end`, `latest`, `filters`.
