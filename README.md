@@ -46,7 +46,7 @@ https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
 4. Load the `extension/dist/` folder as an unpacked extension in Chrome.
 5. Start the HTTP API bridge: `uv run python -m agents.api_server` (defaults to port `8081`).
 10. Open the extension and paste the authentication key into the **API Key** field in settings.
-11. Test the extension by using it on an active webpage.
+11. Test the extension by using it on an active webpage, press and hold cmd/ctrl+shift+L to activate voice input.
 
 ## Security
 - See `docs/security/tls-setup.md` for TLS/HTTPS setup and operational security guidance.
