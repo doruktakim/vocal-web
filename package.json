@@ -6,7 +6,7 @@
     "build:ext": "rm -rf extension/dist && tsc -p tsconfig.extension.json && rsync -a --exclude '*.ts' --exclude '*.d.ts' --exclude 'dist' extension/ extension/dist/",
     "build:tests": "tsc -p tsconfig.tests.json",
     "build": "npm run build:ext && npm run build:tests",
-    "test": "npm run build:ext && npm run build:tests && node tests/dist/url-validator.test.js && node tests/dist/sensitive-fields.test.js"
+    "test": "npm run build:ext && npm run build:tests && node tests/dist/url-validator.test.js && node tests/dist/sensitive-fields.test.js && node tests/dist/local-llm-parse.test.js && node tests/dist/local-interpreter-routing.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",

@@ -109,6 +109,44 @@ body::before {
   align-items: center;
 }
 
+.mode-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.mode-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+
+.mode-label {
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.mode-control select {
+  border: none;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.7);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-ink);
+}
+
+.mode-control select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+.mode-status {
+  margin: 0;
+}
+
 .status-text {
   font-size: 13px;
   color: var(--color-ink-muted);
@@ -334,7 +372,8 @@ body[data-state="listening"] .ghost-btn {
 }
 
 input[type="text"],
-input[type="password"] {
+input[type="password"],
+select {
   width: 100%;
   padding: 10px 12px;
   border-radius: var(--radius-md);
@@ -346,7 +385,8 @@ input[type="password"] {
 }
 
 input[type="text"]:focus,
-input[type="password"]:focus {
+input[type="password"]:focus,
+select:focus {
   box-shadow: 0 0 0 2px var(--color-accent-soft);
 }
 

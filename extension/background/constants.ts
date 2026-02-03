@@ -32,8 +32,12 @@ const STORAGE_KEYS = {
   API_KEY: "vocalApiKey",
   REQUIRE_HTTPS: "vocalRequireHttps",
   PROTOCOL_PREFERENCE: "vocalProtocolPreference",
+  INTERPRETER_MODE: "vocalInterpreterMode",
+  LOCAL_MODEL_ID: "vocalLocalModelId",
 };
 const HEALTH_TIMEOUT_MS = 2500;
+const DEFAULT_LOCAL_MODEL_ID = "Qwen3-1.7B-q4f16_1-MLC";
+const DEFAULT_INTERPRETER_MODE: InterpreterMode = "api";
 
 const HUMAN_CLARIFICATION_REASONS = new Set([
   "missing_query",

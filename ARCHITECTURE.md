@@ -5,7 +5,7 @@ Vocal Web is an MVP multi-agent system that lets a user control the web with voi
 
 ## High-level architecture
 - **Chrome extension (`extension/`)**
-  - **Side panel UI** collects user input (text or Web Speech API), shows clarification prompts, and saves API config/keys.
+  - **Side panel UI** collects user input (text or Web Speech API), shows clarification prompts, saves API config/keys, and can run a local WebLLM interpreter mode.
   - **Background service worker** is the control plane: it calls the API bridge, captures the Accessibility Tree via Chrome DevTools Protocol (CDP), executes plans, and manages clarification loops and navigation resumes.
   - **Content script** optionally records human actions (AX recording) and scrubs sensitive data.
   - **Security helpers** validate navigation URLs and avoid sending sensitive field values.
@@ -15,7 +15,7 @@ Vocal Web is an MVP multi-agent system that lets a user control the web with voi
   - Enforces API key authentication, CORS origin checks, and safe host/TLS configuration.
 
 - **Agents (`agents/`)**
-  - **Interpreter agent**: turns a transcript into an `ActionPlan` (via configured LLM provider: OpenAI, Google Gemini, Anthropic, xAI, or ASI Cloud; otherwise heuristics).
+  - **Interpreter agent**: turns a transcript into an `ActionPlan` when API mode is selected (via configured LLM provider: OpenAI, Google Gemini, Anthropic, xAI, or ASI Cloud; otherwise heuristics).
   - **Navigator agent**: turns an `ActionPlan` + AX tree into an `AXExecutionPlan` (LLM-free matching).
   - **Orchestrator agent**: ties transcript + AX tree to interpreter/navigator for an in-process pipeline.
 
@@ -27,12 +27,14 @@ Vocal Web is an MVP multi-agent system that lets a user control the web with voi
 ## Primary runtime flow (extension → API → execution)
 1. **User issues a command**
    - Side panel or local-access UI collects text or speech transcription (Web Speech API).
+   - Interpreter mode determines whether transcript parsing is local or API-backed.
 2. **Background script resolves API config**
    - Validates HTTPS requirements, API base, and API key.
 3. **Capture context**
    - Background attaches CDP debugger and captures the Accessibility Tree (`Accessibility.getFullAXTree`).
 4. **Interpretation**
-   - `/api/interpreter/actionplan` converts the transcript + context into an `ActionPlan`.
+   - **API mode**: `/api/interpreter/actionplan` converts transcript + context into an `ActionPlan`.
+   - **Local mode**: UI worker (`extension/local-llm/worker.js`) uses WebLLM (`Qwen3-1.7B-q4f16_1-MLC`) on-device, then passes the resulting plan to background execution.
 5. **Clarification loop (optional)**
    - If a `ClarificationRequest` is returned, the side panel asks the user and re-runs with clarification history.
 6. **Navigation planning**
@@ -50,9 +52,10 @@ The background script short-circuits simple commands (scroll, back/forward, relo
 - **API bridge** also exposes Google Speech-to-Text via `/api/stt/transcribe` when configured with `GOOGLE_APPLICATION_CREDENTIALS`.
 
 ## LLM provider selection
-- Interpreter provider config is server-side via environment variables.
+- Interpreter provider config is server-side via environment variables for API mode.
 - `LLM_PROVIDER=auto` chooses the first configured provider in order: OpenAI → Gemini/Google → Anthropic → xAI → ASI Cloud.
 - `LLM_PROVIDER` can explicitly pin one provider (`openai`, `google`, `anthropic`, `xai`, `asi`).
+- Extension interpreter mode can be toggled per-user (`API` vs `Local`); Local mode is explicit and never auto-falls back to API.
 
 ## Security model
 - **API key required** for all action endpoints (`X-API-Key`) with rate limiting on failures.

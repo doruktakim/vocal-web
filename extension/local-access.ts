@@ -11,10 +11,18 @@ const apiBaseInput = document.getElementById("apiBase") as HTMLInputElement | nu
 const apiKeyInput = document.getElementById("apiKey") as HTMLInputElement | null;
 const apiKeyStatus = document.getElementById("apiKeyStatus") as HTMLElement | null;
 const toggleApiKeyVisibility = document.getElementById("toggleApiKeyVisibility") as HTMLElement | null;
+const interpreterModeInput = document.getElementById("interpreterMode") as HTMLSelectElement | null;
+const localModelIdInput = document.getElementById("localModelId") as HTMLInputElement | null;
+const localModelStatus = document.getElementById("localModelStatus") as HTMLElement | null;
 const clarificationPanel = document.getElementById("clarificationPanel") as HTMLElement | null;
 const clarificationHistoryContainer = document.getElementById("clarificationHistory") as HTMLElement | null;
 const resetClarificationButton = document.getElementById("resetClarification") as HTMLButtonElement | null;
 const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
+const INTERPRETER_MODE_KEY = "vocalInterpreterMode";
+const LOCAL_MODEL_ID_KEY = "vocalLocalModelId";
+const DEFAULT_INTERPRETER_MODE: InterpreterMode = "api";
+const DEFAULT_LOCAL_MODEL_ID = "Qwen3-1.7B-q4f16_1-MLC";
+const LEGACY_LOCAL_MODEL_IDS = new Set(["Qwen3-1.7B-q4f16"]);
 const securityUtils = window.VocalWebSecurity;
 const validateNavigationUrl =
   typeof securityUtils?.isValidNavigationUrl === "function"
@@ -31,6 +39,9 @@ let awaitingClarificationResponse = false;
 let pendingClarification: ClarificationRequest | null = null;
 let lastClarificationQuestion = "";
 let clarificationStack: ClarificationHistoryEntry[] = [];
+let interpreterMode: InterpreterMode = DEFAULT_INTERPRETER_MODE;
+let localModelId: string = DEFAULT_LOCAL_MODEL_ID;
+const localLLMClient = window.VocalWebLocalLLM?.createClient?.() || null;
 
 const isExtensionContext =
   typeof (globalThis as GlobalWithChrome).chrome?.runtime?.sendMessage === "function";
@@ -108,6 +119,46 @@ const logStatus = (msg: string): void => {
     return;
   }
   statusEl.textContent = msg;
+};
+
+const normalizeInterpreterMode = (value: unknown): InterpreterMode =>
+  value === "local" ? "local" : "api";
+
+const normalizeLocalModelId = (value: unknown): string => {
+  const raw = String(value || "").trim();
+  if (!raw || LEGACY_LOCAL_MODEL_IDS.has(raw)) {
+    return DEFAULT_LOCAL_MODEL_ID;
+  }
+  return raw;
+};
+
+const setLocalModelStatus = (
+  text: string,
+  tone: "missing" | "valid" | "error" = "missing"
+): void => {
+  if (!localModelStatus) {
+    return;
+  }
+  localModelStatus.textContent = text;
+  localModelStatus.classList.remove("status-valid", "status-error", "status-missing");
+  const className =
+    tone === "valid" ? "status-valid" : tone === "error" ? "status-error" : "status-missing";
+  localModelStatus.classList.add(className);
+};
+
+const applyInterpreterMode = (mode: InterpreterMode): void => {
+  interpreterMode = normalizeInterpreterMode(mode);
+  if (interpreterModeInput) {
+    interpreterModeInput.value = interpreterMode;
+  }
+  if (localModelIdInput) {
+    localModelIdInput.value = localModelId;
+  }
+  if (interpreterMode === "local") {
+    setLocalModelStatus(`Local mode active: ${localModelId}`, "valid");
+  } else {
+    setLocalModelStatus(`API mode active. Model preset: ${localModelId}`, "missing");
+  }
 };
 
 const isClarificationRequest = (value: unknown): value is ClarificationRequest => {
@@ -285,6 +336,12 @@ const clearClarification = (): void => {
 const formatResponseOutput = (resp?: AgentResponse | null): string => {
   if (!resp) {
     return "No response received.";
+  }
+  if (isActionPlan(resp)) {
+    return `Action plan: ${resp.action || "unknown"} -> ${resp.target || "unknown target"}`;
+  }
+  if (isClarificationRequest(resp)) {
+    return formatClarification(resp);
   }
   if (resp.status === "error") {
     return resp.error || "An unknown error occurred.";
@@ -522,10 +579,46 @@ const requestActionPlan = async (
   return resp.json();
 };
 
+const buildLocalActionPlan = async (
+  prompt: string,
+  clarificationResponse: string | null,
+  clarificationHistory: ClarificationHistoryEntry[]
+): Promise<ActionPlan | ClarificationRequest> => {
+  if (!localLLMClient) {
+    throw new Error("Local model runtime is unavailable. Switch Interpreter Mode to API.");
+  }
+  const metadata: Record<string, unknown> = { source: "local-access" };
+  if (clarificationResponse) {
+    metadata.clarification_response = clarificationResponse;
+  }
+  if (clarificationHistory?.length) {
+    metadata.clarification_history = clarificationHistory;
+  }
+  return localLLMClient.interpret(prompt, metadata, {
+    modelId: localModelId,
+    onProgress: (status: LocalLLMStatus) => {
+      if (status?.state === "ready") {
+        setLocalModelStatus(`Local model ready: ${localModelId}`, "valid");
+        return;
+      }
+      if (status?.state === "error") {
+        setLocalModelStatus(
+          `${status?.lastError || "Local model failed."} Switch to API mode or retry local mode.`,
+          "error"
+        );
+        return;
+      }
+      setLocalModelStatus(status?.detail || "Preparing local model...", "missing");
+    },
+  });
+};
+
 const callExtensionRunDemo = async (
   transcript: string,
   clarificationResponse: string | null,
-  clarificationHistory: ClarificationHistoryEntry[]
+  clarificationHistory: ClarificationHistoryEntry[],
+  mode: InterpreterMode,
+  localActionPlan: ActionPlan | ClarificationRequest | null
 ): Promise<AgentResponse> =>
   new Promise<AgentResponse>((resolve, reject) => {
     if (!isExtensionContext) {
@@ -538,6 +631,8 @@ const callExtensionRunDemo = async (
         transcript,
         clarificationResponse,
         clarificationHistory,
+        interpreterMode: mode,
+        localActionPlan,
       },
       (resp: AgentResponse) => {
         if (chrome.runtime.lastError?.message) {
@@ -614,11 +709,34 @@ const submitPrompt = async (
   }
   try {
     let response: InterpreterResponse | null = null;
-    if (isExtensionContext) {
-      response = await callExtensionRunDemo(
+    if (interpreterMode === "local") {
+      setLocalModelStatus(`Initializing local model: ${localModelId}`, "missing");
+      const localActionPlan = await buildLocalActionPlan(
         trimmed,
         clarificationResponse,
         clarificationStack
+      );
+      if (isExtensionContext) {
+        response = await callExtensionRunDemo(
+          trimmed,
+          clarificationResponse,
+          clarificationStack,
+          "local",
+          localActionPlan
+        );
+      } else {
+        response = localActionPlan;
+      }
+      if (output) {
+        output.textContent = formatResponseOutput(response as AgentResponse);
+      }
+    } else if (isExtensionContext) {
+      response = await callExtensionRunDemo(
+        trimmed,
+        clarificationResponse,
+        clarificationStack,
+        "api",
+        null
       );
       if (output) {
         output.textContent = formatResponseOutput(response);
@@ -648,9 +766,19 @@ const submitPrompt = async (
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logStatus("Unable to reach the local bridge.");
+    logStatus(
+      interpreterMode === "local"
+        ? "Local inference failed."
+        : "Unable to reach the local bridge."
+    );
     if (output) {
       output.textContent = `Error: ${message}`;
+    }
+    if (interpreterMode === "local") {
+      setLocalModelStatus(
+        `${message} Switch to API mode or retry local mode after model initialization.`,
+        "error"
+      );
     }
   } finally {
     if (runButton) {
@@ -669,8 +797,13 @@ if (runButton && promptInput) {
 const loadConfig = (): void => {
   if (isExtensionContext) {
     chrome.storage.sync.get(
-      ["vocalApiBase", "vocalApiKey"],
-      (result: { vocalApiBase?: string; vocalApiKey?: string }) => {
+      ["vocalApiBase", "vocalApiKey", INTERPRETER_MODE_KEY, LOCAL_MODEL_ID_KEY],
+      (result: {
+        vocalApiBase?: string;
+        vocalApiKey?: string;
+        vocalInterpreterMode?: InterpreterMode;
+        vocalLocalModelId?: string;
+      }) => {
         if (result.vocalApiBase && apiBaseInput) {
           apiBaseInput.value = result.vocalApiBase;
         }
@@ -682,6 +815,12 @@ const loadConfig = (): void => {
             setApiKeyStatus("API key not set", "missing");
           }
         }
+        const normalizedModelId = normalizeLocalModelId(result.vocalLocalModelId);
+        localModelId = normalizedModelId;
+        if (result.vocalLocalModelId !== normalizedModelId) {
+          chrome.storage.sync.set({ [LOCAL_MODEL_ID_KEY]: normalizedModelId });
+        }
+        applyInterpreterMode(normalizeInterpreterMode(result.vocalInterpreterMode));
       }
     );
   } else {
@@ -692,6 +831,7 @@ const loadConfig = (): void => {
       apiKeyInput.value = "";
       setApiKeyStatus("API key not set", "missing");
     }
+    applyInterpreterMode(DEFAULT_INTERPRETER_MODE);
   }
 };
 
@@ -700,6 +840,17 @@ loadConfig();
 if (isExtensionContext && apiBaseInput) {
   apiBaseInput.addEventListener("change", () => {
     chrome.runtime.sendMessage({ type: "vocal-set-api", apiBase: apiBaseInput.value }, () => {});
+  });
+}
+
+if (interpreterModeInput) {
+  interpreterModeInput.addEventListener("change", (event: Event) => {
+    const target = event.target as HTMLSelectElement | null;
+    const nextMode = normalizeInterpreterMode(target?.value);
+    applyInterpreterMode(nextMode);
+    if (isExtensionContext) {
+      chrome.storage.sync.set({ [INTERPRETER_MODE_KEY]: nextMode });
+    }
   });
 }
 
@@ -719,6 +870,25 @@ if (resetClarificationButton) {
     clearClarification();
     clearClarificationHistory();
     logStatus("Clarifications reset.");
+  });
+}
+
+if (isExtensionContext) {
+  chrome.storage.onChanged.addListener((changes: ChromeStorageChanges, areaName: string) => {
+    if (areaName !== "sync") {
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(changes, INTERPRETER_MODE_KEY)) {
+      applyInterpreterMode(normalizeInterpreterMode(changes[INTERPRETER_MODE_KEY]?.newValue));
+    }
+    if (Object.prototype.hasOwnProperty.call(changes, LOCAL_MODEL_ID_KEY)) {
+      const nextModel = normalizeLocalModelId(changes[LOCAL_MODEL_ID_KEY]?.newValue);
+      localModelId = nextModel;
+      if (changes[LOCAL_MODEL_ID_KEY]?.newValue !== nextModel) {
+        chrome.storage.sync.set({ [LOCAL_MODEL_ID_KEY]: nextModel });
+      }
+      applyInterpreterMode(interpreterMode);
+    }
   });
 }
 

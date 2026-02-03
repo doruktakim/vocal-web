@@ -22,6 +22,33 @@
       </header>
 
       <div class="section-heading">
+        <span class="settings-title">Interpreter</span>
+      </div>
+
+      <div class="settings-content">
+        <div class="option-row">
+          <span class="security-badge" role="status">
+            <span class="security-icon">🧠</span>
+            <span class="security-text">Mode</span>
+          </span>
+          <label class="input-group">
+            <span class="input-label">Interpreter mode</span>
+            <select id="interpreterMode">
+              <option value="api">API providers</option>
+              <option value="local">Local on-device</option>
+            </select>
+          </label>
+        </div>
+        <div class="input-group">
+          <span class="input-label">Local model</span>
+          <input id="localModelId" type="text" readonly value="Qwen3-1.7B-q4f16_1-MLC" />
+          <span id="localModeStatus" class="status-text status-missing">
+            Local mode runs in-browser with WebGPU.
+          </span>
+        </div>
+      </div>
+
+      <div class="section-heading">
         <span class="settings-title">Connection</span>
       </div>
 

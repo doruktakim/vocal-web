@@ -7,6 +7,8 @@ type RuntimeMessage = {
   transcript?: string;
   clarificationResponse?: string | null;
   clarificationHistory?: ClarificationHistoryEntry[];
+  interpreterMode?: InterpreterMode;
+  localActionPlan?: ActionPlan | ClarificationRequest | null;
   prompt_text?: string;
   apiBase?: string;
   traceId?: string;
@@ -33,7 +35,9 @@ chrome.runtime.onMessage.addListener(
           message.transcript,
           tab.id,
           message.clarificationResponse,
-          message.clarificationHistory || []
+          message.clarificationHistory || [],
+          message.interpreterMode,
+          message.localActionPlan || null
         );
         sendResponse(result);
       })

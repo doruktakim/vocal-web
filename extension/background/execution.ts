@@ -1,4 +1,22 @@
-async function fetchActionPlan(
+function isInterpreterMode(value: unknown): value is InterpreterMode {
+  return value === "api" || value === "local";
+}
+
+function normalizeInterpreterMode(value: unknown): InterpreterMode {
+  return isInterpreterMode(value) ? value : DEFAULT_INTERPRETER_MODE;
+}
+
+function resolveActionPlanSource(
+  interpreterMode: InterpreterMode,
+  localActionPlan: ActionPlan | ClarificationRequest | null | undefined
+): "api" | "local" {
+  if (interpreterMode === "local" && localActionPlan && typeof localActionPlan === "object") {
+    return "local";
+  }
+  return "api";
+}
+
+async function fetchActionPlanFromApi(
   apiBase: string,
   transcript: string,
   traceId: string,
@@ -33,6 +51,50 @@ async function fetchActionPlan(
     "/api/interpreter/actionplan",
     body
   );
+}
+
+function fetchActionPlanFromLocal(
+  localActionPlan: ActionPlan | ClarificationRequest | null | undefined
+): ActionPlan | ClarificationRequest {
+  if (localActionPlan && typeof localActionPlan === "object") {
+    return localActionPlan;
+  }
+  throw new Error(
+    "Local interpreter mode is selected but no local action plan was provided. Switch to API mode or retry local mode after model initialization."
+  );
+}
+
+async function fetchActionPlan(
+  apiBase: string,
+  transcript: string,
+  traceId: string,
+  pageContext: AxTree | null,
+  clarificationResponse: string | null,
+  clarificationHistory: ClarificationHistoryEntry[] = [],
+  interpreterMode: InterpreterMode = DEFAULT_INTERPRETER_MODE,
+  localActionPlan: ActionPlan | ClarificationRequest | null = null
+): Promise<ActionPlan | ClarificationRequest> {
+  const source = resolveActionPlanSource(interpreterMode, localActionPlan);
+  if (source === "local") {
+    return fetchActionPlanFromLocal(localActionPlan);
+  }
+  if (interpreterMode === "local") {
+    return fetchActionPlanFromLocal(localActionPlan);
+  }
+  return fetchActionPlanFromApi(
+    apiBase,
+    transcript,
+    traceId,
+    pageContext,
+    clarificationResponse,
+    clarificationHistory
+  );
+}
+
+if (typeof globalThis !== "undefined") {
+  (globalThis as typeof globalThis & {
+    __vocalResolveActionPlanSource?: typeof resolveActionPlanSource;
+  }).__vocalResolveActionPlanSource = resolveActionPlanSource;
 }
 
 /**
@@ -470,7 +532,9 @@ async function runDemoFlowInternalAX(
   transcript: string,
   tabId: number,
   clarificationResponse: string | null,
-  clarificationHistory: ClarificationHistoryEntry[] = []
+  clarificationHistory: ClarificationHistoryEntry[] = [],
+  interpreterModeRaw: unknown = DEFAULT_INTERPRETER_MODE,
+  localActionPlan: ActionPlan | ClarificationRequest | null = null
 ): Promise<AgentResponse> {
   let traceId: string | null = null;
   try {
@@ -500,17 +564,22 @@ async function runDemoFlowInternalAX(
     let axTree: AxTree = await collectAccessibilityTree(tabId, traceId);
 
     // Get action plan from interpreter
+    const interpreterMode = normalizeInterpreterMode(interpreterModeRaw);
     const actionPlan = await fetchActionPlan(
       apiBase,
       transcript,
       traceId,
       axTree, // Use axTree as page context
       clarificationResponse,
-      clarificationHistory
+      clarificationHistory,
+      interpreterMode,
+      localActionPlan
     );
 
     if (actionPlan.schema_version !== "clarification_v1") {
-      await appendAgentActionPlan(traceId, actionPlan as ActionPlan, tabId);
+      const resolvedActionPlanForRecord = actionPlan as ActionPlan;
+      resolvedActionPlanForRecord.interpreter_mode = interpreterMode;
+      await appendAgentActionPlan(traceId, resolvedActionPlanForRecord, tabId);
     }
 
     if (actionPlan.schema_version === "clarification_v1") {
@@ -524,6 +593,7 @@ async function runDemoFlowInternalAX(
 
     // Check if we need to navigate first
     const resolvedActionPlan = actionPlan as ActionPlan;
+    resolvedActionPlan.interpreter_mode = interpreterMode;
     const desiredUrl = resolvedActionPlan?.entities?.url || resolvedActionPlan?.value;
     const currentUrl = axTree?.page_url || "";
     const needsNavigation =
@@ -764,10 +834,19 @@ async function runDemoFlow(
   transcript: string,
   tabId: number,
   clarificationResponse: string | null,
-  clarificationHistory: ClarificationHistoryEntry[] = []
+  clarificationHistory: ClarificationHistoryEntry[] = [],
+  interpreterMode: unknown = DEFAULT_INTERPRETER_MODE,
+  localActionPlan: ActionPlan | ClarificationRequest | null = null
 ): Promise<AgentResponse> {
   try {
-    return await runDemoFlowInternalAX(transcript, tabId, clarificationResponse, clarificationHistory);
+    return await runDemoFlowInternalAX(
+      transcript,
+      tabId,
+      clarificationResponse,
+      clarificationHistory,
+      interpreterMode,
+      localActionPlan
+    );
   } catch (err) {
     if (err instanceof AuthenticationError) {
       return { status: "error", error: err.message };

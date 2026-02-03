@@ -4,6 +4,9 @@
 
   const apiBaseField = document.getElementById("apiBase") as HTMLInputElement | null;
   const apiKeyField = document.getElementById("apiKey") as HTMLInputElement | null;
+  const interpreterModeField = document.getElementById("interpreterMode") as HTMLSelectElement | null;
+  const localModelIdField = document.getElementById("localModelId") as HTMLInputElement | null;
+  const localModeStatus = document.getElementById("localModeStatus") as HTMLElement | null;
   const apiKeyStatus = document.getElementById("apiKeyStatus") as HTMLElement | null;
   const toggleApiKeyVisibility = document.getElementById(
     "toggleApiKeyVisibility"
@@ -19,6 +22,18 @@
   const backToMain = document.getElementById("backToMain") as HTMLButtonElement | null;
   const API_KEY_PATTERN = /^[A-Za-z0-9_-]{32,}$/;
   const DEBUG_RECORDING_STORAGE_KEY = "DEBUG_RECORDING";
+  const INTERPRETER_MODE_KEY = "vocalInterpreterMode";
+  const LOCAL_MODEL_ID_KEY = "vocalLocalModelId";
+  const DEFAULT_LOCAL_MODEL_ID = "Qwen3-1.7B-q4f16_1-MLC";
+  const LEGACY_LOCAL_MODEL_IDS = new Set(["Qwen3-1.7B-q4f16"]);
+
+  const normalizeLocalModelId = (value: unknown): string => {
+    const raw = String(value || "").trim();
+    if (!raw || LEGACY_LOCAL_MODEL_IDS.has(raw)) {
+      return DEFAULT_LOCAL_MODEL_ID;
+    }
+    return raw;
+  };
 
   const isValidApiKey = (value: string): boolean => API_KEY_PATTERN.test((value || "").trim());
 
@@ -143,12 +158,21 @@
 
   function loadConfig(): void {
     chrome.storage.sync.get(
-      ["vocalApiBase", "vocalApiKey", "vocalRequireHttps", DEBUG_RECORDING_STORAGE_KEY],
+      [
+        "vocalApiBase",
+        "vocalApiKey",
+        "vocalRequireHttps",
+        DEBUG_RECORDING_STORAGE_KEY,
+        INTERPRETER_MODE_KEY,
+        LOCAL_MODEL_ID_KEY,
+      ],
       (result: {
         vocalApiBase?: string;
         vocalApiKey?: string;
         vocalRequireHttps?: boolean;
         DEBUG_RECORDING?: string;
+        vocalInterpreterMode?: InterpreterMode;
+        vocalLocalModelId?: string;
       }) => {
         if (apiBaseField && result.vocalApiBase) {
           apiBaseField.value = result.vocalApiBase;
@@ -163,6 +187,26 @@
         }
         if (requireHttpsToggle) {
           requireHttpsToggle.checked = Boolean(result.vocalRequireHttps);
+        }
+        if (interpreterModeField) {
+          interpreterModeField.value =
+            result.vocalInterpreterMode === "local" ? "local" : "api";
+        }
+        const normalizedModelId = normalizeLocalModelId(result.vocalLocalModelId);
+        if (localModelIdField) {
+          localModelIdField.value = normalizedModelId;
+        }
+        if (result.vocalLocalModelId !== normalizedModelId) {
+          chrome.storage.sync.set({ [LOCAL_MODEL_ID_KEY]: normalizedModelId });
+        }
+        if (localModeStatus) {
+          const currentMode = result.vocalInterpreterMode === "local" ? "local" : "api";
+          localModeStatus.textContent =
+            currentMode === "local"
+              ? "Local mode enabled. First run may download model assets."
+              : "API mode enabled. Local model is available as a privacy-first option.";
+          localModeStatus.classList.remove("status-valid", "status-error", "status-missing");
+          localModeStatus.classList.add(currentMode === "local" ? "status-valid" : "status-missing");
         }
         if (debugRecordingToggle) {
           debugRecordingToggle.checked = String(result.DEBUG_RECORDING || "").trim() === "1";
@@ -197,6 +241,28 @@
       const enabled = Boolean(target?.checked);
       chrome.storage.sync.set({ [DEBUG_RECORDING_STORAGE_KEY]: enabled ? "1" : "0" });
     });
+  }
+
+  if (interpreterModeField) {
+    interpreterModeField.addEventListener("change", (event: Event) => {
+      const target = event.target as HTMLSelectElement | null;
+      const mode: InterpreterMode = target?.value === "local" ? "local" : "api";
+      chrome.storage.sync.set({ [INTERPRETER_MODE_KEY]: mode }, () => {
+        if (localModeStatus) {
+          localModeStatus.textContent =
+            mode === "local"
+              ? "Local mode enabled. First run may download model assets."
+              : "API mode enabled. Local model is available as a privacy-first option.";
+          localModeStatus.classList.remove("status-valid", "status-error", "status-missing");
+          localModeStatus.classList.add(mode === "local" ? "status-valid" : "status-missing");
+        }
+      });
+    });
+  }
+
+  if (localModelIdField) {
+    localModelIdField.value = DEFAULT_LOCAL_MODEL_ID;
+    chrome.storage.sync.set({ [LOCAL_MODEL_ID_KEY]: DEFAULT_LOCAL_MODEL_ID });
   }
 
   if (backToMain) {

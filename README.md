@@ -39,6 +39,7 @@ https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
    - Run `mkcert -install && mkcert localhost 127.0.0.1 ::1` for locally trusted certificates, then point `SSL_KEYFILE`/`SSL_CERTFILE` at the generated files in `.envrc`.
    - Fill in the other secrets, then run `direnv allow`
    - Leave `LLM_PROVIDER=auto` to let the server pick the first configured provider.
+   - Optional privacy-first mode: set Interpreter Mode to **Local** from extension settings to run transcript interpretation on-device via WebLLM.
 3. Install JS tooling and build the extension bundle:
    ```bash
    npm install
@@ -56,6 +57,16 @@ https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
 ## Next steps
 - Currently creating my own dataset to further improve the element selection algorithms and create challenging tests. The use of language models in the navigator component will likely be reintroduced using a process-of-elimination approach once the selection algorithms are good enough to make it worth the additional cost/compute.
 - Will make <3B local open-source models available for increased privacy and free operation.
+
+## Local on-device interpreter notes
+- Local mode currently targets `Qwen3-1.7B-q4f16_1-MLC`.
+- The runtime is vendored from `@mlc-ai/web-llm` in `extension/vendor/web-llm/index.js`.
+
+## Credits and licensing
+- WebLLM integration is powered by [mlc-ai/web-llm](https://github.com/mlc-ai/web-llm) (vendored from `@mlc-ai/web-llm@0.2.80`).
+- The vendored WebLLM runtime in `extension/vendor/web-llm/index.js` is licensed under Apache 2.0.
+- The corresponding third-party license text is included at `extension/vendor/web-llm/LICENSE`.
+- Additional attribution details are listed in `THIRD_PARTY_NOTICES.md`.
 
 ## Accessibility Goals
 - We started building this project in a hackathon with the idea that LLMs could help make the web more accesible, particularly for individuals who face challenges using traditional input devices like keyboards and mice. There is a really long way to go before this can be considered a true accessibility tool as there is still large performance improvements needed, but I'm very excited to keep building. If you have ideas or feedback, I’d love to hear from you.

@@ -6,6 +6,7 @@ declare global {
 
   type JsonPrimitive = string | number | boolean | null;
   type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+  type InterpreterMode = "api" | "local";
 
   interface ClarificationRequest {
     schema_version?: "clarification_v1";
@@ -278,4 +279,53 @@ declare global {
 
   var VocalWebDomUtils: VocalWebDomUtils | undefined;
   var VocalWebSecurity: VocalWebSecurity | undefined;
+
+  interface LocalLLMStatus {
+    state?: "idle" | "downloading" | "initializing" | "inferencing" | "ready" | "error";
+    modelId?: string | null;
+    progress?: number;
+    detail?: string;
+    lastError?: string | null;
+  }
+
+  type LocalLLMProgressHandler = (status: LocalLLMStatus, detail?: string) => void;
+
+  interface WorkerEnvelope {
+    type?: "progress" | "result";
+    requestId?: string;
+    ok?: boolean;
+    error?: string;
+    stage?: string;
+    progress?: number;
+    detail?: string;
+    status?: LocalLLMStatus;
+    data?: WorkerResultPayload;
+  }
+
+  interface WorkerResultPayload {
+    status?: LocalLLMStatus;
+    text?: string;
+  }
+
+  interface LocalLLMClient {
+    ensureReady(modelId?: string, onProgress?: LocalLLMProgressHandler): Promise<LocalLLMStatus>;
+    getStatus(onProgress?: LocalLLMProgressHandler): Promise<LocalLLMStatus>;
+    interpret(
+      transcript: string,
+      metadata: Record<string, unknown>,
+      options?: { modelId?: string; onProgress?: LocalLLMProgressHandler }
+    ): Promise<ActionPlan | ClarificationRequest>;
+  }
+
+  interface VocalWebLocalLLMNamespace {
+    INTERPRETER_SYSTEM_PROMPT?: string;
+    defaultModelId?: string;
+    createClient?: () => LocalLLMClient;
+    extractJsonObject?: (text: string) => string | null;
+    parseInterpreterJson?: (text: string) => ActionPlan | ClarificationRequest | null;
+  }
+
+  interface Window {
+    VocalWebLocalLLM?: VocalWebLocalLLMNamespace;
+  }
 }

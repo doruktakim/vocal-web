@@ -117,6 +117,28 @@
         margin-top: 0.35rem;
       }
 
+      .mode-row {
+        display: grid;
+        gap: 0.45rem;
+      }
+
+      .mode-row select,
+      .mode-row input[type="text"] {
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        padding: 0.75rem 0.95rem;
+        font-size: 0.95rem;
+        font-family: inherit;
+        background: #f8fafc;
+      }
+
+      .mode-row select:focus,
+      .mode-row input[type="text"]:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        outline: none;
+      }
+
       .status-valid {
         color: #16a34a;
       }
@@ -375,6 +397,18 @@
           </div>
           <span id="apiKeyStatus" class="field-status status-missing">API key not set</span>
         </label>
+        <div class="mode-row">
+          <label for="interpreterMode">Interpreter mode</label>
+          <select id="interpreterMode">
+            <option value="api">API providers</option>
+            <option value="local">Local (on-device)</option>
+          </select>
+          <label for="localModelId">Local model</label>
+          <input id="localModelId" type="text" readonly value="Qwen3-1.7B-q4f16_1-MLC" />
+          <span id="localModelStatus" class="field-status status-missing">
+            API mode enabled.
+          </span>
+        </div>
         <div class="controls">
           <button
             id="micButton"
@@ -398,6 +432,9 @@
       </section>
     </main>
     <script src="lib/url-validator.js"></script>
+    <script src="local-llm/prompt.js"></script>
+    <script src="local-llm/parse.js"></script>
+    <script src="local-llm/client.js"></script>
     <script src="local-access.js"></script>
   </body>
 </html>

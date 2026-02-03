@@ -41,6 +41,19 @@
         <span id="statusText" class="status-text">Idle...</span>
       </div>
 
+      <section class="mode-panel" aria-label="Interpreter mode">
+        <label class="mode-control" for="interpreterModeQuick">
+          <span class="mode-label">Interpreter</span>
+          <select id="interpreterModeQuick">
+            <option value="api">API</option>
+            <option value="local">Local (on-device)</option>
+          </select>
+        </label>
+        <p id="localModelStatus" class="status-text mode-status">
+          Model: Qwen3-1.7B-q4f16_1-MLC
+        </p>
+      </section>
+
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
       <div class="control-row">
@@ -70,6 +83,9 @@
         </button>
       </section>
     </main>
+    <script src="local-llm/prompt.js"></script>
+    <script src="local-llm/parse.js"></script>
+    <script src="local-llm/client.js"></script>
     <script src="sidepanel.js"></script>
   </body>
 </html>
