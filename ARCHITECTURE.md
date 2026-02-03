@@ -15,7 +15,7 @@ Vocal Web is an MVP multi-agent system that lets a user control the web with voi
   - Enforces API key authentication, CORS origin checks, and safe host/TLS configuration.
 
 - **Agents (`agents/`)**
-  - **Interpreter agent**: turns a transcript into an `ActionPlan` (via ASI Cloud LLM if configured, otherwise heuristics).
+  - **Interpreter agent**: turns a transcript into an `ActionPlan` (via configured LLM provider: OpenAI, Google Gemini, Anthropic, xAI, or ASI Cloud; otherwise heuristics).
   - **Navigator agent**: turns an `ActionPlan` + AX tree into an `AXExecutionPlan` (LLM-free matching).
   - **Orchestrator agent**: ties transcript + AX tree to interpreter/navigator for an in-process pipeline.
 
@@ -48,6 +48,11 @@ The background script short-circuits simple commands (scroll, back/forward, relo
 ## Voice input options
 - **Extension UI** uses Web Speech API for local transcription.
 - **API bridge** also exposes Google Speech-to-Text via `/api/stt/transcribe` when configured with `GOOGLE_APPLICATION_CREDENTIALS`.
+
+## LLM provider selection
+- Interpreter provider config is server-side via environment variables.
+- `LLM_PROVIDER=auto` chooses the first configured provider in order: OpenAI → Gemini/Google → Anthropic → xAI → ASI Cloud.
+- `LLM_PROVIDER` can explicitly pin one provider (`openai`, `google`, `anthropic`, `xai`, `asi`).
 
 ## Security model
 - **API key required** for all action endpoints (`X-API-Key`) with rate limiting on failures.

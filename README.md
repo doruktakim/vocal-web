@@ -35,9 +35,11 @@ https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
 2. Set up `direnv` once, then create your local env file:
    - `cp .envrc.example .envrc`
    - Generate a strong key for `VCAA_API_KEY` (minimum 32 characters, letters/numbers/`-_` only) using `openssl rand -hex 32`
+   - Configure at least one LLM provider key in `.envrc` (`OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, or `ASI_CLOUD_API_KEY`).
+   - You do not need to set `ASI_CLOUD_API_URL` unless you want to override the default (`https://inference.asicloud.cudos.org/v1`).
    - Run `mkcert -install && mkcert localhost 127.0.0.1 ::1` for locally trusted certificates, then point `SSL_KEYFILE`/`SSL_CERTFILE` at the generated files in `.envrc`.
    - Fill in the other secrets, then run `direnv allow`
-   - Recommended to keep `asi1-mini` as the model, which is currently free and performs great.
+   - Leave `LLM_PROVIDER=auto` to let the server pick the first configured provider.
 3. Install JS tooling and build the extension bundle:
    ```bash
    npm install

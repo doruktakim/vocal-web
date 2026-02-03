@@ -1,6 +1,30 @@
-export ASI_CLOUD_API_URL="https://inference.asicloud.cudos.org/v1"
-export ASI_CLOUD_API_KEY="<your-api-key>"
+# LLM provider configuration (default LLM_PROVIDER=auto):
+# - auto: OPENAI -> GEMINI/GOOGLE -> ANTHROPIC -> XAI -> ASI_CLOUD (first configured wins)
+# - explicit: openai | google | anthropic | xai | asi
+export LLM_PROVIDER="auto"
+export LLM_MODEL="" # optional global model override for any provider
+
+# OpenAI
+export OPENAI_API_KEY="<your-openai-api-key>"
+export OPENAI_MODEL="gpt-5-nano"
+
+# Google Gemini (OpenAI-compatible endpoint)
+export GEMINI_API_KEY="<your-gemini-api-key>" # alias supported: GOOGLE_API_KEY
+export GEMINI_MODEL="gemini-2.5-flash-lite"
+
+# Anthropic
+export ANTHROPIC_API_KEY="<your-anthropic-api-key>"
+export ANTHROPIC_MODEL="claude-haiku-4-5"
+
+# xAI (OpenAI-compatible endpoint)
+export XAI_API_KEY="<your-xai-api-key>"
+export XAI_MODEL="grok-4-1-fast-non-reasoning"
+
+# ASI Cloud (kept for backward compatibility)
+export ASI_CLOUD_API_KEY=""
 export ASI_CLOUD_MODEL="asi1-mini"
+# Optional override (defaults to https://inference.asicloud.cudos.org/v1):
+# export ASI_CLOUD_API_URL="https://inference.asicloud.cudos.org/v1"
 export GOOGLE_APPLICATION_CREDENTIALS="/exact/path/to/speechToText.json"
 export SSL_CERTFILE="/absolute/path/to/localhost+2.pem"
 export SSL_KEYFILE="/absolute/path/to/localhost+2-key.pem"

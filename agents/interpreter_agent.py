@@ -60,12 +60,16 @@ async def build_action_plan_from_transcript(
         part.strip() for part in transcript_parts if part and part.strip()
     )
     transcript_for_processing = transcript_for_processing or msg.transcript
-    if asi_client.api_url and asi_client.api_key:
+    if asi_client.is_configured:
         remote = await asi_client.interpret_transcript(
             transcript_for_processing, msg.metadata or {}
         )
         if remote:
-            logger.info("Interpreter used LLM parse (trace_id=%s)", msg.trace_id)
+            logger.info(
+                "Interpreter used LLM parse (provider=%s, trace_id=%s)",
+                asi_client.provider,
+                msg.trace_id,
+            )
             if remote.get("schema_version") == "clarification_v1":
                 return ClarificationRequest(**remote)
             if remote.get("schema_version") == "actionplan_v1":
