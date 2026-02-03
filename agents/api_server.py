@@ -20,7 +20,7 @@ import uvicorn
 
 from agents.interpreter_agent import build_action_plan_from_transcript
 from agents.navigator_agent import build_ax_execution_plan
-from agents.shared.asi_client import ASIClient
+from agents.shared.llm_client import LLMClient
 from agents.shared.auth import verify_api_key
 from agents.shared.google_stt import TranscriptionError, transcribe_audio_base64
 from agents.shared.schemas import (
@@ -94,7 +94,7 @@ app.add_middleware(
 )
 
 
-asi_client = ASIClient()
+llm_client = LLMClient()
 
 
 @app.get("/health")
@@ -131,7 +131,7 @@ async def transcribe_audio(payload: Dict[str, Any]):
 
 @app.post("/api/interpreter/actionplan", dependencies=[Depends(verify_api_key)])
 async def interpreter_endpoint(body: TranscriptMessage):
-    plan = await build_action_plan_from_transcript(body, asi_client)
+    plan = await build_action_plan_from_transcript(body, llm_client)
     return jsonable_encoder(plan)
 
 

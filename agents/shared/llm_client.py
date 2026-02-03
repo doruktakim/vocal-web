@@ -33,7 +33,7 @@ class ProviderConfig:
         return True
 
 
-class ASIClient:
+class LLMClient:
     def __init__(self, api_url: Optional[str] = None, api_key: Optional[str] = None, model: Optional[str] = None):
         self._legacy_api_url = api_url
         self._legacy_api_key = api_key
@@ -141,7 +141,7 @@ class ASIClient:
         if explicit_provider != "auto":
             return self._provider_config(explicit_provider)
 
-        # Keep backward compatibility for direct ASI constructor overrides.
+        # Keep backward compatibility for direct legacy ASI constructor overrides.
         if self._legacy_api_key or self._legacy_api_url:
             return self._provider_config("asi")
 

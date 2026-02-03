@@ -1,6 +1,6 @@
 import asyncio
 
-from agents.shared.asi_client import ASIClient
+from agents.shared.llm_client import LLMClient
 
 
 class _FakeChoiceMessage:
@@ -28,7 +28,7 @@ def test_auto_provider_prefers_openai(monkeypatch):
     monkeypatch.delenv("ASI_CLOUD_API_URL", raising=False)
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
 
-    client = ASIClient()
+    client = LLMClient()
     assert client.provider == "openai"
     assert client.is_configured is True
 
@@ -37,7 +37,7 @@ def test_explicit_anthropic_provider(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-abcdefghijklmnopqrstuvwxyz123456")
 
-    client = ASIClient()
+    client = LLMClient()
     assert client.provider == "anthropic"
     assert client.is_configured is True
 
@@ -62,9 +62,9 @@ def test_openai_compatible_calls_google_base_url(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "google")
     monkeypatch.setenv("GEMINI_API_KEY", "AIzaSyA_test_key_abcdefghijklmnopqrstuvwxyz")
     monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
-    monkeypatch.setattr("agents.shared.asi_client.openai.OpenAI", FakeOpenAIClient)
+    monkeypatch.setattr("agents.shared.llm_client.openai.OpenAI", FakeOpenAIClient)
 
-    client = ASIClient()
+    client = LLMClient()
     result = asyncio.run(client.complete("hello"))
 
     assert result is not None
@@ -96,9 +96,9 @@ def test_openai_compatible_calls_xai_base_url_with_default_model(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "xai")
     monkeypatch.setenv("XAI_API_KEY", "xai-test-key-abcdefghijklmnopqrstuvwxyz123456")
     monkeypatch.delenv("XAI_MODEL", raising=False)
-    monkeypatch.setattr("agents.shared.asi_client.openai.OpenAI", FakeOpenAIClient)
+    monkeypatch.setattr("agents.shared.llm_client.openai.OpenAI", FakeOpenAIClient)
 
-    client = ASIClient()
+    client = LLMClient()
     result = asyncio.run(client.complete("hello"))
 
     assert result is not None
@@ -126,9 +126,9 @@ def test_anthropic_request_headers_and_payload(monkeypatch):
 
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-abcdefghijklmnopqrstuvwxyz123456")
-    monkeypatch.setattr("agents.shared.asi_client.httpx.post", fake_post)
+    monkeypatch.setattr("agents.shared.llm_client.httpx.post", fake_post)
 
-    client = ASIClient()
+    client = LLMClient()
     text = asyncio.run(client.complete("extract a plan"))
 
     assert text == '{"schema_version":"actionplan_v1"}'
@@ -153,8 +153,8 @@ def test_provider_failure_returns_none(monkeypatch):
 
     monkeypatch.setenv("LLM_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-openai-abcdefghijklmnopqrstuvwxyz12")
-    monkeypatch.setattr("agents.shared.asi_client.openai.OpenAI", FakeOpenAIClient)
+    monkeypatch.setattr("agents.shared.llm_client.openai.OpenAI", FakeOpenAIClient)
 
-    client = ASIClient()
+    client = LLMClient()
     result = asyncio.run(client.complete("hello"))
     assert result is None

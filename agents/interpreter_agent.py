@@ -8,7 +8,7 @@ import re
 from agents.shared.local_agents import Agent, Bureau, Context
 
 try:
-    from agents.shared.asi_client import ASIClient
+    from agents.shared.llm_client import LLMClient
     from agents.shared.schemas import (
         ActionPlan,
         ClarificationOption,
@@ -20,7 +20,7 @@ try:
     from agents.shared.utils_urls import map_site_to_url
 except Exception:
     # Support running as a script (not as a package)
-    from shared.asi_client import ASIClient
+    from shared.llm_client import LLMClient
     from shared.schemas import (
         ActionPlan,
         ClarificationOption,
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 async def build_action_plan_from_transcript(
-    msg: TranscriptMessage, asi_client: ASIClient
+    msg: TranscriptMessage, llm_client: LLMClient
 ) -> Union[ActionPlan, ClarificationRequest]:
     # Prefer an LLM-backed parse when available; fallback to local heuristics.
     metadata = msg.metadata or {}
@@ -60,14 +60,14 @@ async def build_action_plan_from_transcript(
         part.strip() for part in transcript_parts if part and part.strip()
     )
     transcript_for_processing = transcript_for_processing or msg.transcript
-    if asi_client.is_configured:
-        remote = await asi_client.interpret_transcript(
+    if llm_client.is_configured:
+        remote = await llm_client.interpret_transcript(
             transcript_for_processing, msg.metadata or {}
         )
         if remote:
             logger.info(
                 "Interpreter used LLM parse (provider=%s, trace_id=%s)",
-                asi_client.provider,
+                llm_client.provider,
                 msg.trace_id,
             )
             if remote.get("schema_version") == "clarification_v1":
@@ -265,7 +265,7 @@ async def build_action_plan_from_transcript(
     return clarifying("What should I do?", "ambiguous_intent")
 
 
-asi_client = ASIClient()
+llm_client = LLMClient()
 interpreter_agent = Agent(
     name="interpreter",
     seed=INTERPRETER_SEED,
@@ -275,7 +275,7 @@ interpreter_agent = Agent(
 
 @interpreter_agent.on_message(model=TranscriptMessage)
 async def handle_transcript(ctx: Context, msg: TranscriptMessage):
-    plan = await build_action_plan_from_transcript(msg, asi_client)
+    plan = await build_action_plan_from_transcript(msg, llm_client)
     await ctx.send(msg.sender, plan)
     ctx.logger.info(
         "Interpreter sent %s (trace_id=%s)",
