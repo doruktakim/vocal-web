@@ -9,8 +9,8 @@ if PROJECT_ROOT not in map(Path, sys.path):
     sys.path.insert(0, str(PROJECT_ROOT))
 
 TEST_API_KEY = "test_key_abcdefghijklmnopqrstuvwxyz1234"
-os.environ["VCAA_API_KEY"] = TEST_API_KEY
-os.environ["VCAA_ALLOWED_ORIGINS"] = ""
+os.environ["VOCAL_API_KEY"] = TEST_API_KEY
+os.environ["VOCAL_ALLOWED_ORIGINS"] = ""
 
 from agents.shared import auth
 

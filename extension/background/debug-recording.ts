@@ -264,7 +264,7 @@ async function downloadRecording(recording: Recording, storageKey: string): Prom
   return new Promise<boolean>((resolve) => {
     chrome.downloads.download({ url, filename, saveAs: false }, async (downloadId: number | undefined) => {
       if (chrome.runtime.lastError || !downloadId) {
-        console.warn("[VCAA] Failed to download AX recording", chrome.runtime.lastError);
+        console.warn("[VOCAL] Failed to download AX recording", chrome.runtime.lastError);
         resolve(false);
         return;
       }
@@ -662,7 +662,7 @@ async function setHumanRecordingEnabled(tabId: number, enabled: boolean): Promis
     });
   } catch (err) {
     if (!isMissingReceiverError(err)) {
-      console.warn("[VCAA] Failed to toggle human AX recording", err);
+      console.warn("[VOCAL] Failed to toggle human AX recording", err);
     }
   }
 }
@@ -688,7 +688,7 @@ async function captureHumanSnapshotForTab(tabId: number): Promise<AxSnapshot | n
     await appendHumanAxSnapshot(axTree, tabId);
     return axTree;
   } catch (err) {
-    console.warn("[VCAA] Failed to capture human AX snapshot", err);
+    console.warn("[VOCAL] Failed to capture human AX snapshot", err);
     return null;
   }
 }

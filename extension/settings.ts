@@ -42,14 +42,14 @@
     }
     const trimmed = value.trim();
     if (!trimmed) {
-      chrome.storage.sync.remove("vcaaApiKey", () => setApiKeyStatus("API key not set", "missing"));
+      chrome.storage.sync.remove("vocalApiKey", () => setApiKeyStatus("API key not set", "missing"));
       return;
     }
     if (!isValidApiKey(trimmed)) {
       setApiKeyStatus("API key must be at least 32 characters.", "error");
       return;
     }
-    chrome.storage.sync.set({ vcaaApiKey: trimmed }, () => setApiKeyStatus("API key saved", "valid"));
+    chrome.storage.sync.set({ vocalApiKey: trimmed }, () => setApiKeyStatus("API key saved", "valid"));
   };
 
   const toggleApiKeyMask = (): void => {
@@ -98,7 +98,7 @@
     if (!connectionSecurityStatus) {
       return;
     }
-    chrome.runtime.sendMessage({ type: "vcaa-get-security-state" }, (resp: SecurityStateResponse) => {
+    chrome.runtime.sendMessage({ type: "vocal-get-security-state" }, (resp: SecurityStateResponse) => {
       if (!resp || resp.status !== "ok") {
         if (securityIcon) securityIcon.textContent = "⚠️";
         if (securityText) securityText.textContent = "Unknown";
@@ -125,7 +125,7 @@
       return;
     }
     const apiBase = apiBaseField.value.trim();
-    chrome.runtime.sendMessage({ type: "vcaa-set-api", apiBase }, () => {
+    chrome.runtime.sendMessage({ type: "vocal-set-api", apiBase }, () => {
       refreshConnectionSecurityIndicator();
       if (typeof callback === "function") {
         callback();
@@ -136,33 +136,33 @@
   function handleRequireHttpsToggle(event: Event) {
     const target = event?.target as HTMLInputElement | null;
     const enforced = Boolean(target?.checked);
-    chrome.storage.sync.set({ vcaaRequireHttps: enforced }, () => {
+    chrome.storage.sync.set({ vocalRequireHttps: enforced }, () => {
       refreshConnectionSecurityIndicator();
     });
   }
 
   function loadConfig(): void {
     chrome.storage.sync.get(
-      ["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps", DEBUG_RECORDING_STORAGE_KEY],
+      ["vocalApiBase", "vocalApiKey", "vocalRequireHttps", DEBUG_RECORDING_STORAGE_KEY],
       (result: {
-        vcaaApiBase?: string;
-        vcaaApiKey?: string;
-        vcaaRequireHttps?: boolean;
+        vocalApiBase?: string;
+        vocalApiKey?: string;
+        vocalRequireHttps?: boolean;
         DEBUG_RECORDING?: string;
       }) => {
-        if (apiBaseField && result.vcaaApiBase) {
-          apiBaseField.value = result.vcaaApiBase;
+        if (apiBaseField && result.vocalApiBase) {
+          apiBaseField.value = result.vocalApiBase;
         }
         if (apiKeyField) {
-          apiKeyField.value = result.vcaaApiKey || "";
-          if (result.vcaaApiKey) {
+          apiKeyField.value = result.vocalApiKey || "";
+          if (result.vocalApiKey) {
             setApiKeyStatus("API key saved", "valid");
           } else {
             setApiKeyStatus("Not configured", "missing");
           }
         }
         if (requireHttpsToggle) {
-          requireHttpsToggle.checked = Boolean(result.vcaaRequireHttps);
+          requireHttpsToggle.checked = Boolean(result.vocalRequireHttps);
         }
         if (debugRecordingToggle) {
           debugRecordingToggle.checked = String(result.DEBUG_RECORDING || "").trim() === "1";

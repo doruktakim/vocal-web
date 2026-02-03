@@ -286,14 +286,14 @@ const persistApiKey = (value: string): void => {
   }
   const trimmed = value.trim();
   if (!trimmed) {
-    chrome.storage.sync.remove("vcaaApiKey", () => setApiKeyStatus("API key not set", "missing"));
+    chrome.storage.sync.remove("vocalApiKey", () => setApiKeyStatus("API key not set", "missing"));
     return;
   }
   if (!isValidApiKey(trimmed)) {
     setApiKeyStatus("API key must be at least 32 characters.", "error");
     return;
   }
-  chrome.storage.sync.set({ vcaaApiKey: trimmed }, () =>
+  chrome.storage.sync.set({ vocalApiKey: trimmed }, () =>
     setApiKeyStatus("API key saved", "valid")
   );
 };
@@ -345,7 +345,7 @@ function refreshConnectionSecurityIndicator(): void {
   if (!connectionSecurityStatus) {
     return;
   }
-  chrome.runtime.sendMessage({ type: "vcaa-get-security-state" }, (resp: SecurityStateResponse) => {
+  chrome.runtime.sendMessage({ type: "vocal-get-security-state" }, (resp: SecurityStateResponse) => {
     if (!resp || resp.status !== "ok") {
       if (securityIcon) securityIcon.textContent = "⚠️";
       if (securityText) securityText.textContent = "Unknown";
@@ -552,7 +552,7 @@ function requestMicrophoneAccessViaPopup(): Promise<boolean> {
     const popupUrl = chrome.runtime.getURL("mic-permission.html");
     const popup = window.open(
       popupUrl,
-      "vcaa-mic-permission",
+      "vocal-mic-permission",
       "popup,width=420,height=380"
     );
     if (!popup) {
@@ -574,7 +574,7 @@ function requestMicrophoneAccessViaPopup(): Promise<boolean> {
         return;
       }
       const data = event.data as { type?: string; granted?: boolean };
-      if (data?.type !== "vcaa-mic-permission") {
+      if (data?.type !== "vocal-mic-permission") {
         return;
       }
       cleanup(Boolean(data.granted));
@@ -827,7 +827,7 @@ function renderDebugInfo(resp: DebugPayload | null | undefined): void {
 }
 
 function refreshDebugFromStorage(): void {
-  chrome.runtime.sendMessage({ type: "vcaa-get-last-debug" }, (resp: { status?: string; payload?: DebugPayload }) => {
+  chrome.runtime.sendMessage({ type: "vocal-get-last-debug" }, (resp: { status?: string; payload?: DebugPayload }) => {
     if (resp?.status !== "ok" || !resp.payload) {
       return;
     }
@@ -1114,25 +1114,25 @@ function refreshDebugRecordingFlag(): void {
 
 function loadConfig(): void {
   chrome.storage.sync.get(
-    ["vcaaApiBase", "vcaaApiKey", "vcaaRequireHttps"],
-    (result: { vcaaApiBase?: string; vcaaApiKey?: string; vcaaRequireHttps?: boolean }) => {
+    ["vocalApiBase", "vocalApiKey", "vocalRequireHttps"],
+    (result: { vocalApiBase?: string; vocalApiKey?: string; vocalRequireHttps?: boolean }) => {
     if (apiBaseField) {
-      if (result.vcaaApiBase) {
-        apiBaseField.value = result.vcaaApiBase;
+      if (result.vocalApiBase) {
+        apiBaseField.value = result.vocalApiBase;
       } else {
         apiBaseField.value = "http://localhost:8081";
       }
     }
     if (apiKeyField) {
-      apiKeyField.value = result.vcaaApiKey || "";
-      if (result.vcaaApiKey) {
+      apiKeyField.value = result.vocalApiKey || "";
+      if (result.vocalApiKey) {
         setApiKeyStatus("API key saved", "valid");
       } else {
         setApiKeyStatus("API key not set", "missing");
       }
     }
     if (requireHttpsToggle) {
-      requireHttpsToggle.checked = Boolean(result.vcaaRequireHttps);
+      requireHttpsToggle.checked = Boolean(result.vocalRequireHttps);
     }
     if (useAccessibilityTreeToggle) {
       useAccessibilityTreeToggle.checked = true;
@@ -1151,7 +1151,7 @@ function persistApiBaseField(callback?: () => void): void {
     return;
   }
   const apiBase = apiBaseField.value.trim();
-  chrome.runtime.sendMessage({ type: "vcaa-set-api", apiBase }, () => {
+  chrome.runtime.sendMessage({ type: "vocal-set-api", apiBase }, () => {
     refreshConnectionSecurityIndicator();
     if (typeof callback === "function") {
       callback();
@@ -1162,7 +1162,7 @@ function persistApiBaseField(callback?: () => void): void {
 function handleRequireHttpsToggle(event: Event) {
   const target = event?.target as HTMLInputElement | null;
   const enforced = Boolean(target?.checked);
-  chrome.storage.sync.set({ vcaaRequireHttps: enforced }, () => {
+  chrome.storage.sync.set({ vocalRequireHttps: enforced }, () => {
     refreshConnectionSecurityIndicator();
   });
 }
@@ -1184,7 +1184,7 @@ function runDemo(transcriptInput: string = "", clarificationResponse: string | n
   persistApiBaseField();
   chrome.runtime.sendMessage(
     {
-      type: "vcaa-run-demo",
+      type: "vocal-run-demo",
       transcript,
       clarificationResponse,
       clarificationHistory: clarificationStack,
@@ -1321,7 +1321,7 @@ chrome.storage.onChanged.addListener((changes: ChromeStorageChanges, areaName: s
 });
 
 chrome.runtime.onMessage.addListener((message: { type?: string; payload?: RunDemoResponse }) => {
-  if (message?.type === "vcaa-run-demo-update" && message.payload) {
+  if (message?.type === "vocal-run-demo-update" && message.payload) {
     applyRunDemoResponse(message.payload);
   }
 });

@@ -57,7 +57,7 @@ The background script short-circuits simple commands (scroll, back/forward, relo
 ## Security model
 - **API key required** for all action endpoints (`X-API-Key`) with rate limiting on failures.
 - **Host binding protections** prevent accidental remote exposure unless explicitly allowed.
-- **TLS enforcement** when `VCAA_ENV=production`; extension can require HTTPS.
+- **TLS enforcement** when `VOCAL_ENV=production`; extension can require HTTPS.
 - **URL validation** blocks dangerous schemes and optionally unknown domains.
 - **Sensitive field filtering** avoids collecting password/OTP/credit-card fields during human recording.
 

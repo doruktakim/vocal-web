@@ -82,7 +82,7 @@ async function getViewportCenterViaCDP(tabId: number): Promise<{ x: number; y: n
       return { x: Math.floor(width / 2), y: Math.floor(height / 2) };
     }
   } catch (err) {
-    console.warn("[VCAA] Failed to get layout metrics for viewport center", err);
+    console.warn("[VOCAL] Failed to get layout metrics for viewport center", err);
   }
   // Fallback to a small in-viewport coordinate.
   return { x: 10, y: 10 };
@@ -140,6 +140,6 @@ async function cdpSmoothScroll(
 chrome.debugger.onDetach.addListener((source: { tabId?: number }, reason: string) => {
   if (source.tabId) {
     debuggerAttached.delete(source.tabId);
-    console.log(`[VCAA] Debugger detached from tab ${source.tabId}: ${reason}`);
+    console.log(`[VOCAL] Debugger detached from tab ${source.tabId}: ${reason}`);
   }
 });

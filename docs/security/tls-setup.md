@@ -4,7 +4,7 @@ Vocal Web supports HTTPS natively. Configure the following environment variables
 
 - `SSL_KEYFILE` – path to the PEM-encoded private key.
 - `SSL_CERTFILE` – path to the PEM-encoded certificate (full chain).
-- `VCAA_ENV=production` – optional but recommended for real deployments; it enforces HTTPS and safe host bindings.
+- `VOCAL_ENV=production` – optional but recommended for real deployments; it enforces HTTPS and safe host bindings.
 
 When both PEM paths are valid the API server automatically enables TLS. The extension detects HTTPS support and switches to `https://` without any additional changes.
 
@@ -38,10 +38,10 @@ For test environments where mkcert is unavailable:
 openssl req -x509 -nodes -days 7 \
   -subj "/CN=localhost" \
   -newkey rsa:4096 \
-  -keyout vcaa-dev.key \
-  -out vcaa-dev.crt
-export SSL_KEYFILE="$PWD/vcaa-dev.key"
-export SSL_CERTFILE="$PWD/vcaa-dev.crt"
+  -keyout vocal-dev.key \
+  -out vocal-dev.crt
+export SSL_KEYFILE="$PWD/vocal-dev.key"
+export SSL_CERTFILE="$PWD/vocal-dev.crt"
 python -m agents.api_server
 ```
 
@@ -63,7 +63,7 @@ Benefits:
 Example Caddyfile:
 
 ```
-vcaa.example.com {
+vocal.example.com {
     reverse_proxy localhost:8081
     encode gzip
 }
@@ -76,4 +76,4 @@ Point the DNS `A/AAAA` record at the box, run `caddy run`, and Caddy will fetch/
 - **“TLS certificate expired” on startup** – renew the certificate; the server refuses to run with expired PEMs to avoid silent MITM exposure.
 - **“HTTPS required” errors in the extension** – enable TLS or uncheck “Require HTTPS connection” in the popup for local testing.
 - **`ERR_CERT_AUTHORITY_INVALID` in Chrome** – your certificate isn’t trusted. Install mkcert’s root CA or use a publicly trusted cert.
-- **Health probe keeps failing** – ensure the certificate includes the host you configured in `VCAA_API_HOST` (`localhost`, `127.0.0.1`, etc.) and that the port is accessible.
+- **Health probe keeps failing** – ensure the certificate includes the host you configured in `VOCAL_API_HOST` (`localhost`, `127.0.0.1`, etc.) and that the port is accessible.

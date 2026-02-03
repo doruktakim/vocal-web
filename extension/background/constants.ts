@@ -7,9 +7,9 @@ const SIDE_PANEL_BEHAVIOR = { openPanelOnActionClick: true };
 // Session Storage Keys for Pending Execution Plans
 // ============================================================================
 const SESSION_STORAGE_KEYS = {
-  PENDING_PLAN: "vcaaPendingPlan",
+  PENDING_PLAN: "vocalPendingPlan",
 };
-const LAST_DEBUG_STORAGE_KEY = "vcaaLastDebug";
+const LAST_DEBUG_STORAGE_KEY = "vocalLastDebug";
 
 // ============================================================================
 // Debug Recording (feature-flagged via DEBUG_RECORDING=1 in sync storage)
@@ -28,10 +28,10 @@ const AX_CAPTURE_CONTEXT = {
 
 // ============================================================================
 const STORAGE_KEYS = {
-  API_BASE: "vcaaApiBase",
-  API_KEY: "vcaaApiKey",
-  REQUIRE_HTTPS: "vcaaRequireHttps",
-  PROTOCOL_PREFERENCE: "vcaaProtocolPreference",
+  API_BASE: "vocalApiBase",
+  API_KEY: "vocalApiKey",
+  REQUIRE_HTTPS: "vocalRequireHttps",
+  PROTOCOL_PREFERENCE: "vocalProtocolPreference",
 };
 const HEALTH_TIMEOUT_MS = 2500;
 

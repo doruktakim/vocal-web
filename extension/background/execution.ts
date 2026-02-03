@@ -143,7 +143,7 @@ async function executeAxPlanViaCDP(
         }
       }
     } catch (err) {
-      console.warn("[VCAA] Failed to capture AX diff:", err);
+      console.warn("[VOCAL] Failed to capture AX diff:", err);
     }
   };
 
@@ -478,7 +478,7 @@ async function runDemoFlowInternalAX(
     if (!clarificationResponse) {
       const fastCommand = matchFastCommand(transcript);
       if (fastCommand) {
-        console.log("[VCAA-AX] Fast path: executing", fastCommand.type);
+        console.log("[VOCAL-AX] Fast path: executing", fastCommand.type);
         const result = await executeFastCommandViaCDP(tabId, fastCommand);
         return {
           status: "completed",
@@ -530,7 +530,7 @@ async function runDemoFlowInternalAX(
       desiredUrl && !currentUrl.includes(desiredUrl.replace(/^https?:\/\//, "").split("/")[0]);
 
     if (needsNavigation) {
-      console.log(`[VCAA-AX] Navigation needed to: ${desiredUrl}`);
+      console.log(`[VOCAL-AX] Navigation needed to: ${desiredUrl}`);
       await appendAgentNavigation(traceId, desiredUrl, "action_plan_navigation", tabId);
 
       // Save pending plan BEFORE navigation
@@ -633,7 +633,7 @@ async function runDemoFlowInternalAX(
       );
 
       if (navStep && navStep.value) {
-        console.log(`[VCAA-AX] Plan contains navigation step to: ${navStep.value}`);
+        console.log(`[VOCAL-AX] Plan contains navigation step to: ${navStep.value}`);
         await appendAgentNavigation(traceId, navStep.value, "execution_plan_navigation", tabId);
 
         // Remove the nav step and save remaining steps as pending
@@ -730,7 +730,7 @@ async function runDemoFlowInternalAX(
 
       const executionErrors = execResult?.errors || [];
       if (executionErrors.length) {
-        console.warn("[VCAA-AX] Execution errors detected", { traceId, errors: executionErrors });
+        console.warn("[VOCAL-AX] Execution errors detected", { traceId, errors: executionErrors });
         await new Promise((resolve) => setTimeout(resolve, 800));
         axTree = await collectAccessibilityTree(tabId, traceId);
         continue;

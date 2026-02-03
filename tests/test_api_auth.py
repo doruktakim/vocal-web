@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from agents.api_server import app
 
-VALID_KEY = os.environ["VCAA_API_KEY"]
+VALID_KEY = os.environ["VOCAL_API_KEY"]
 client = TestClient(app)
 
 

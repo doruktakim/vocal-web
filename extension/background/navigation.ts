@@ -85,12 +85,12 @@ async function rematchElementBySemantics(
   });
 
   if (candidates.length === 0) {
-    console.warn(`[VCAA] Could not re-match element: ${originalElement.name} (${originalElement.role})`);
+    console.warn(`[VOCAL] Could not re-match element: ${originalElement.name} (${originalElement.role})`);
     return null;
   }
 
   // Return the first candidate (best match)
-  console.log(`[VCAA] Re-matched element "${originalElement.name}" to backend_node_id=${candidates[0].backend_node_id}`);
+  console.log(`[VOCAL] Re-matched element "${originalElement.name}" to backend_node_id=${candidates[0].backend_node_id}`);
   return candidates[0].backend_node_id;
 }
 
@@ -101,11 +101,11 @@ async function rematchElementBySemantics(
 async function resumePendingPlanAfterNavigation(tabId: number): Promise<void> {
   const pendingData = await getPendingPlan(tabId);
   if (!pendingData) {
-    console.log(`[VCAA] No pending plan for tab ${tabId}`);
+    console.log(`[VOCAL] No pending plan for tab ${tabId}`);
     return;
   }
 
-  console.log(`[VCAA] Resuming pending plan for tab ${tabId}, trace_id=${pendingData.traceId}`);
+  console.log(`[VOCAL] Resuming pending plan for tab ${tabId}, trace_id=${pendingData.traceId}`);
 
   try {
     const { traceId, actionPlan, apiBase } = pendingData;
@@ -136,7 +136,7 @@ async function resumePendingPlanAfterNavigation(tabId: number): Promise<void> {
       executionPlan = await fetchAxExecutionPlan(apiBase, actionPlan, axTree, traceId, planPhase);
 
       if (executionPlan.schema_version === "clarification_v1") {
-        console.log(`[VCAA] Navigator requested clarification after navigation`);
+        console.log(`[VOCAL] Navigator requested clarification after navigation`);
         // Can't easily surface clarification here, log and exit
         await finishAgentRecording(traceId, "clarification");
         return;
@@ -239,11 +239,11 @@ async function resumePendingPlanAfterNavigation(tabId: number): Promise<void> {
       axDiffs,
     };
     await persistLastDebug(completedPayload);
-    chrome.runtime.sendMessage({ type: "vcaa-run-demo-update", payload: completedPayload });
+    chrome.runtime.sendMessage({ type: "vocal-run-demo-update", payload: completedPayload });
 
-    console.log(`[VCAA] Resumed AX plan execution complete for tab ${tabId}`);
+    console.log(`[VOCAL] Resumed AX plan execution complete for tab ${tabId}`);
   } catch (err) {
-    console.error(`[VCAA] Failed to resume pending plan for tab ${tabId}:`, err);
+    console.error(`[VOCAL] Failed to resume pending plan for tab ${tabId}:`, err);
   }
 }
 
@@ -255,7 +255,7 @@ chrome.webNavigation.onCompleted.addListener(async (details: WebNavigationDetail
   }
 
   const tabId = details.tabId;
-  console.log(`[VCAA] Navigation completed for tab ${tabId}: ${details.url}`);
+  console.log(`[VOCAL] Navigation completed for tab ${tabId}: ${details.url}`);
 
   // Check if this tab has a pending plan waiting for navigation
   if (pendingNavigationTabs.has(tabId)) {

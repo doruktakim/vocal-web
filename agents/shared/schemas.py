@@ -1,4 +1,4 @@
-"""Shared schemas for VCAA agents and browser extension."""
+"""Shared schemas for VOCAL agents and browser extension."""
 
 from __future__ import annotations
 

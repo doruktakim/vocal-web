@@ -14,7 +14,7 @@ async function getAccessibilityTree(tabId: number): Promise<unknown[]> {
     })) as any;
     return result?.nodes || [];
   } catch (err) {
-    console.warn("[VCAA] Failed to get accessibility tree:", err);
+    console.warn("[VOCAL] Failed to get accessibility tree:", err);
     return [];
   }
 }
@@ -190,7 +190,7 @@ async function collectAccessibilityTree(tabId: number, traceId: string): Promise
   // Get current page URL
   const tab = await chrome.tabs.get(tabId);
 
-  console.log(`[VCAA] Collected ${elements.length} interactive elements from AX tree (trace_id=${traceId})`);
+  console.log(`[VOCAL] Collected ${elements.length} interactive elements from AX tree (trace_id=${traceId})`);
 
   const payload: AxTree = {
     schema_version: "axtree_v1",

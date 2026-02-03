@@ -5,7 +5,7 @@ function initSidePanelBehavior(): void {
   try {
     chrome.sidePanel.setPanelBehavior(SIDE_PANEL_BEHAVIOR);
   } catch (err) {
-    console.warn("[VCAA] Unable to set side panel behavior", err);
+    console.warn("[VOCAL] Unable to set side panel behavior", err);
   }
 }
 
@@ -16,7 +16,7 @@ async function openSidePanelForWindow(windowId: number | undefined): Promise<voi
   try {
     await chrome.sidePanel.open({ windowId });
   } catch (err) {
-    console.warn("[VCAA] Unable to open side panel", err);
+    console.warn("[VOCAL] Unable to open side panel", err);
   }
 }
 
@@ -28,7 +28,7 @@ async function openSidePanelForCurrentWindow(): Promise<void> {
     const win = await chrome.windows.getCurrent();
     await openSidePanelForWindow(win?.id);
   } catch (err) {
-    console.warn("[VCAA] Unable to open side panel", err);
+    console.warn("[VOCAL] Unable to open side panel", err);
   }
 }
 

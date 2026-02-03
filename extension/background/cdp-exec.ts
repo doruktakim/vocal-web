@@ -44,7 +44,7 @@ async function cdpGetElementBox(
       height: content[5] - content[1],
     };
   } catch (err) {
-    console.warn("[VCAA] Failed to get element box:", err);
+    console.warn("[VOCAL] Failed to get element box:", err);
     return null;
   }
 }

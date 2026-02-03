@@ -240,7 +240,7 @@ declare global {
   type ChromeStorageChanges = Record<string, ChromeStorageChange>;
 
   interface Window {
-    __vcaaContentScriptInstalled?: boolean;
+    __vocalContentScriptInstalled?: boolean;
     VocalWebDomUtils?: VocalWebDomUtils;
     VocalWebSecurity?: VocalWebSecurity;
     SpeechRecognition?: SpeechRecognitionConstructor;

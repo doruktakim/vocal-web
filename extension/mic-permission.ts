@@ -15,7 +15,7 @@
   const notifyOpener = (granted: boolean): void => {
     if (window.opener && !window.opener.closed) {
       window.opener.postMessage(
-        { type: "vcaa-mic-permission", granted },
+        { type: "vocal-mic-permission", granted },
         window.location.origin
       );
     }

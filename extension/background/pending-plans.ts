@@ -13,7 +13,7 @@ const pendingNavigationTabs = new Map<number, boolean>();
 async function savePendingPlan(tabId: number, pendingData: PendingPlanData): Promise<void> {
   const key = `${SESSION_STORAGE_KEYS.PENDING_PLAN}_${tabId}`;
   await chrome.storage.session.set({ [key]: pendingData });
-  console.log(`[VCAA] Saved pending plan for tab ${tabId}`, pendingData.traceId);
+  console.log(`[VOCAL] Saved pending plan for tab ${tabId}`, pendingData.traceId);
 }
 
 /**
@@ -34,5 +34,5 @@ async function getPendingPlan(tabId: number): Promise<PendingPlanData | null> {
 async function clearPendingPlan(tabId: number): Promise<void> {
   const key = `${SESSION_STORAGE_KEYS.PENDING_PLAN}_${tabId}`;
   await chrome.storage.session.remove([key]);
-  console.log(`[VCAA] Cleared pending plan for tab ${tabId}`);
+  console.log(`[VOCAL] Cleared pending plan for tab ${tabId}`);
 }

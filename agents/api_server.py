@@ -1,4 +1,4 @@
-"""HTTP bridge for VCAA agents."""
+"""HTTP bridge for VOCAL agents."""
 
 from __future__ import annotations
 
@@ -49,12 +49,12 @@ class ServerSecurityConfig:
 
 
 def load_allowed_origins() -> List[str]:
-    raw = os.getenv("VCAA_ALLOWED_ORIGINS", "")
+    raw = os.getenv("VOCAL_ALLOWED_ORIGINS", "")
     origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
     if origins:
         logger.info("Allowing explicit origins: %s", origins)
     else:
-        logger.info("No explicit VCAA_ALLOWED_ORIGINS configured.")
+        logger.info("No explicit VOCAL_ALLOWED_ORIGINS configured.")
     return origins
 
 
@@ -82,7 +82,7 @@ class OriginValidatorMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-app = FastAPI(title="VCAA Agents API", version="0.1.0")
+app = FastAPI(title="VOCAL Agents API", version="0.1.0")
 app.add_middleware(OriginValidatorMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -242,10 +242,10 @@ def _load_tls_configuration() -> tuple[Optional[str], Optional[str], Optional[da
 
 
 def _build_server_config() -> ServerSecurityConfig:
-    host = _normalize_host(os.getenv("VCAA_API_HOST", "127.0.0.1"))
-    port = int(os.getenv("VCAA_API_PORT", "8081"))
-    env_mode = os.getenv("VCAA_ENV", "development").strip().lower() or "development"
-    allow_remote = _env_flag("VCAA_ALLOW_REMOTE", False)
+    host = _normalize_host(os.getenv("VOCAL_API_HOST", "127.0.0.1"))
+    port = int(os.getenv("VOCAL_API_PORT", "8081"))
+    env_mode = os.getenv("VOCAL_ENV", "development").strip().lower() or "development"
+    allow_remote = _env_flag("VOCAL_ALLOW_REMOTE", False)
     ssl_keyfile, ssl_certfile, cert_expiration = _load_tls_configuration()
     is_localhost = _host_is_local(host)
     host_ip = _host_ip(host)
@@ -254,7 +254,7 @@ def _build_server_config() -> ServerSecurityConfig:
     if not is_localhost and not allow_remote:
         raise RuntimeError(
             "Refusing to bind the API server to a non-localhost address. "
-            "Set VCAA_ALLOW_REMOTE=true to acknowledge the risk."
+            "Set VOCAL_ALLOW_REMOTE=true to acknowledge the risk."
         )
 
     if listens_globally:
@@ -271,7 +271,7 @@ def _build_server_config() -> ServerSecurityConfig:
     tls_enabled = bool(ssl_keyfile and ssl_certfile)
     if env_mode == "production" and not tls_enabled:
         raise RuntimeError(
-            "TLS is required when VCAA_ENV=production. Provide SSL_KEYFILE and SSL_CERTFILE."
+            "TLS is required when VOCAL_ENV=production. Provide SSL_KEYFILE and SSL_CERTFILE."
         )
 
     if not tls_enabled:

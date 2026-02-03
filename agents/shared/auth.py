@@ -14,7 +14,7 @@ from fastapi import Header, HTTPException, Request
 
 
 AUTH_HEADER = "X-API-Key"
-API_KEY_ENV_VAR = "VCAA_API_KEY"
+API_KEY_ENV_VAR = "VOCAL_API_KEY"
 KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,}$")
 FAILED_LIMIT = 10
 FAILED_WINDOW_SECONDS = 60

@@ -58,7 +58,7 @@ const persistApiKey = (value: string): void => {
   const trimmed = value.trim();
   if (!trimmed) {
     if (isExtensionContext) {
-      chrome.storage.sync.remove("vcaaApiKey", () => setApiKeyStatus("API key not set", "missing"));
+      chrome.storage.sync.remove("vocalApiKey", () => setApiKeyStatus("API key not set", "missing"));
     } else {
       setApiKeyStatus("API key not set", "missing");
     }
@@ -69,7 +69,7 @@ const persistApiKey = (value: string): void => {
     return;
   }
   if (isExtensionContext) {
-    chrome.storage.sync.set({ vcaaApiKey: trimmed }, () =>
+    chrome.storage.sync.set({ vocalApiKey: trimmed }, () =>
       setApiKeyStatus("API key saved", "valid")
     );
   } else {
@@ -534,7 +534,7 @@ const callExtensionRunDemo = async (
     }
     chrome.runtime.sendMessage(
       {
-        type: "vcaa-run-demo",
+        type: "vocal-run-demo",
         transcript,
         clarificationResponse,
         clarificationHistory,
@@ -605,7 +605,7 @@ const submitPrompt = async (
     addClarificationHistoryEntry(lastClarificationQuestion, clarificationResponse);
     lastClarificationQuestion = "";
   }
-  logStatus("Sending prompt to VCAA agents…");
+  logStatus("Sending prompt to VOCAL agents…");
   if (output) {
     output.textContent = `Prompt queued: "${trimmed}"`;
   }
@@ -669,14 +669,14 @@ if (runButton && promptInput) {
 const loadConfig = (): void => {
   if (isExtensionContext) {
     chrome.storage.sync.get(
-      ["vcaaApiBase", "vcaaApiKey"],
-      (result: { vcaaApiBase?: string; vcaaApiKey?: string }) => {
-        if (result.vcaaApiBase && apiBaseInput) {
-          apiBaseInput.value = result.vcaaApiBase;
+      ["vocalApiBase", "vocalApiKey"],
+      (result: { vocalApiBase?: string; vocalApiKey?: string }) => {
+        if (result.vocalApiBase && apiBaseInput) {
+          apiBaseInput.value = result.vocalApiBase;
         }
         if (apiKeyInput) {
-          apiKeyInput.value = result.vcaaApiKey || "";
-          if (result.vcaaApiKey) {
+          apiKeyInput.value = result.vocalApiKey || "";
+          if (result.vocalApiKey) {
             setApiKeyStatus("API key saved", "valid");
           } else {
             setApiKeyStatus("API key not set", "missing");
@@ -699,7 +699,7 @@ loadConfig();
 
 if (isExtensionContext && apiBaseInput) {
   apiBaseInput.addEventListener("change", () => {
-    chrome.runtime.sendMessage({ type: "vcaa-set-api", apiBase: apiBaseInput.value }, () => {});
+    chrome.runtime.sendMessage({ type: "vocal-set-api", apiBase: apiBaseInput.value }, () => {});
   });
 }
 

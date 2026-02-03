@@ -20,7 +20,7 @@ type RuntimeResponse = Record<string, unknown>;
 
 chrome.runtime.onMessage.addListener(
   (message: RuntimeMessage, sender: RuntimeMessageSender, sendResponse: (response: RuntimeResponse) => void) => {
-  if (message?.type === "vcaa-run-demo") {
+  if (message?.type === "vocal-run-demo") {
     chrome.tabs
       .query({ active: true, currentWindow: true })
       .then(async (tabs: ChromeTabInfo[]) => {
@@ -151,7 +151,7 @@ chrome.runtime.onMessage.addListener(
     return true;
   }
 
-  if (message?.type === "vcaa-set-api") {
+  if (message?.type === "vocal-set-api") {
     const normalized = stripTrailingSlash(normalizeApiBaseInput(message.apiBase));
     const persist = () => chrome.storage.sync.set({ [STORAGE_KEYS.API_BASE]: normalized }, () =>
       sendResponse({ status: "ok" })
@@ -170,7 +170,7 @@ chrome.runtime.onMessage.addListener(
     return true;
   }
 
-  if (message?.type === "vcaa-get-security-state") {
+  if (message?.type === "vocal-get-security-state") {
     getStoredSecurityState()
       .then((state) => sendResponse({ status: "ok", state }))
       .catch((err: unknown) =>
@@ -179,7 +179,7 @@ chrome.runtime.onMessage.addListener(
     return true;
   }
 
-  if (message?.type === "vcaa-get-last-debug") {
+  if (message?.type === "vocal-get-last-debug") {
     readLastDebug()
       .then((payload) => sendResponse({ status: "ok", payload }))
       .catch((err: unknown) => sendResponse({ status: "error", error: String(err) }));
@@ -187,7 +187,7 @@ chrome.runtime.onMessage.addListener(
   }
 
   // Collect accessibility tree via CDP
-  if (message?.type === "vcaa-collect-axtree") {
+  if (message?.type === "vocal-collect-axtree") {
     chrome.tabs
       .query({ active: true, currentWindow: true })
       .then(async (tabs: ChromeTabInfo[]) => {
@@ -209,7 +209,7 @@ chrome.runtime.onMessage.addListener(
   }
 
   // Execute a step via CDP (click, input, focus using backendNodeId)
-  if (message?.type === "vcaa-cdp-execute") {
+  if (message?.type === "vocal-cdp-execute") {
     chrome.tabs
       .query({ active: true, currentWindow: true })
       .then(async (tabs: ChromeTabInfo[]) => {
@@ -232,7 +232,7 @@ chrome.runtime.onMessage.addListener(
   }
 
   // Detach debugger from active tab (cleanup)
-  if (message?.type === "vcaa-cdp-detach") {
+  if (message?.type === "vocal-cdp-detach") {
     chrome.tabs
       .query({ active: true, currentWindow: true })
       .then(async (tabs: ChromeTabInfo[]) => {

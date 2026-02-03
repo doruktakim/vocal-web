@@ -7,7 +7,7 @@ from starlette.requests import Request
 
 from agents.shared import auth
 
-VALID_KEY = os.environ["VCAA_API_KEY"]
+VALID_KEY = os.environ["VOCAL_API_KEY"]
 
 
 def make_request(ip: str = "127.0.0.1") -> Request:

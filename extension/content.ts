@@ -1,8 +1,8 @@
 (() => {
-  if (window.__vcaaContentScriptInstalled) {
+  if (window.__vocalContentScriptInstalled) {
     return;
   }
-  window.__vcaaContentScriptInstalled = true;
+  window.__vocalContentScriptInstalled = true;
 
   const domUtils = window.VocalWebDomUtils || {};
   const detectSensitiveField =
