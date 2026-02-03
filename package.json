@@ -6,9 +6,12 @@
     "build:ext": "rm -rf extension/dist && tsc -p tsconfig.extension.json && rsync -a --exclude '*.ts' --exclude '*.d.ts' --exclude 'dist' extension/ extension/dist/",
     "build:tests": "tsc -p tsconfig.tests.json",
     "build": "npm run build:ext && npm run build:tests",
-    "test": "npm run build:ext && npm run build:tests && node tests/dist/url-validator.test.js && node tests/dist/sensitive-fields.test.js && node tests/dist/local-llm-parse.test.js && node tests/dist/local-interpreter-routing.test.js"
+    "test": "npm run build:ext && npm run build:tests && node tests/dist/url-validator.test.js && node tests/dist/sensitive-fields.test.js && node tests/dist/local-llm-parse.test.js && node tests/dist/local-interpreter-routing.test.js",
+    "test:e2e:extension": "playwright test tests/extension-full-context.spec.ts --headed",
+    "test:e2e:extension:headed": "playwright test tests/extension-full-context.spec.ts --headed --debug"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.1",
     "@types/node": "^20.11.30",
     "typescript": "^5.6.3"
   }

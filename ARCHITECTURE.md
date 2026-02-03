@@ -47,6 +47,10 @@ Vocal Web is an MVP multi-agent system that lets a user control the web with voi
 ## Fast-path commands
 The background script short-circuits simple commands (scroll, back/forward, reload, top/bottom) and executes them directly without calling the API bridge.
 
+## Validation layers
+- Unit-style TS tests in `tests/` cover URL/security helpers and local interpreter parsing/routing.
+- A Playwright extension-context E2E (`tests/extension-full-context.spec.ts`) launches Chromium with the real unpacked extension, configures `settings.html`, captures an API-mode flight action plan via interpreter-only background messaging (no navigation/execution), then runs Local mode with retries and prompt tightening until comparable local planning matches the API output.
+
 ## Voice input options
 - **Extension UI** uses Web Speech API for local transcription.
 - **API bridge** also exposes Google Speech-to-Text via `/api/stt/transcribe` when configured with `GOOGLE_APPLICATION_CREDENTIALS`.

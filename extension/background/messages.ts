@@ -20,13 +20,41 @@ type RuntimeMessageSender = { tab?: ChromeTabInfo };
 
 type RuntimeResponse = Record<string, unknown>;
 
+const isExtensionPage = (url: string | undefined): boolean => {
+  const value = String(url || "").trim().toLowerCase();
+  return value.startsWith("chrome-extension://");
+};
+
+const resolveRunnableTab = async (sender: RuntimeMessageSender): Promise<ChromeTabInfo | null> => {
+  const senderTab = sender?.tab;
+  if (senderTab?.id && !isExtensionPage(senderTab.url)) {
+    return senderTab;
+  }
+
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const activeTab = activeTabs[0];
+  if (activeTab?.id && !isExtensionPage(activeTab.url)) {
+    return activeTab;
+  }
+
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  const fallbackTab = tabs.find((tab: ChromeTabInfo) => tab?.id && !isExtensionPage(tab.url));
+  if (fallbackTab?.id) {
+    return fallbackTab;
+  }
+
+  if (activeTab?.id) {
+    return activeTab;
+  }
+
+  return null;
+};
+
 chrome.runtime.onMessage.addListener(
   (message: RuntimeMessage, sender: RuntimeMessageSender, sendResponse: (response: RuntimeResponse) => void) => {
   if (message?.type === "vocal-run-demo") {
-    chrome.tabs
-      .query({ active: true, currentWindow: true })
-      .then(async (tabs: ChromeTabInfo[]) => {
-        const tab = tabs[0];
+    resolveRunnableTab(sender)
+      .then(async (tab: ChromeTabInfo | null) => {
         if (!tab?.id) {
           sendResponse({ status: "error", error: "No active tab" });
           return;
@@ -41,6 +69,19 @@ chrome.runtime.onMessage.addListener(
         );
         sendResponse(result);
       })
+      .catch((err: unknown) => sendResponse({ status: "error", error: String(err) }));
+    return true;
+  }
+
+  if (message?.type === "vocal-run-interpreter") {
+    runInterpreterOnlyFlow(
+      message.transcript || "",
+      message.clarificationResponse || null,
+      message.clarificationHistory || [],
+      message.interpreterMode,
+      message.localActionPlan || null
+    )
+      .then((result) => sendResponse(result))
       .catch((err: unknown) => sendResponse({ status: "error", error: String(err) }));
     return true;
   }

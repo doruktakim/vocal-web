@@ -854,3 +854,82 @@ async function runDemoFlow(
     throw err;
   }
 }
+
+const isExtensionContextUrl = (value: unknown): boolean => {
+  const url = String(value || "").trim().toLowerCase();
+  return url.startsWith("chrome-extension://");
+};
+
+const getInterpreterPageContext = async (): Promise<AxTree | null> => {
+  try {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const tab = tabs.find((candidate: ChromeTabInfo) => {
+      if (!candidate?.id) {
+        return false;
+      }
+      return !isExtensionContextUrl(candidate.url);
+    });
+    if (!tab?.url) {
+      return null;
+    }
+    return {
+      schema_version: "axtree_v1",
+      id: crypto.randomUUID(),
+      trace_id: null,
+      page_url: tab.url,
+      generated_at: new Date().toISOString(),
+      elements: [],
+    };
+  } catch {
+    return null;
+  }
+};
+
+async function runInterpreterOnlyFlow(
+  transcript: string,
+  clarificationResponse: string | null,
+  clarificationHistory: ClarificationHistoryEntry[] = [],
+  interpreterModeRaw: unknown = DEFAULT_INTERPRETER_MODE,
+  localActionPlan: ActionPlan | ClarificationRequest | null = null
+): Promise<AgentResponse> {
+  try {
+    const traceId = crypto.randomUUID();
+    const interpreterMode = normalizeInterpreterMode(interpreterModeRaw);
+    const { apiBase } = await resolveApiConfig();
+    const pageContext = await getInterpreterPageContext();
+    const actionPlan = await fetchActionPlan(
+      apiBase,
+      transcript,
+      traceId,
+      pageContext,
+      clarificationResponse,
+      clarificationHistory,
+      interpreterMode,
+      localActionPlan
+    );
+
+    if (actionPlan.schema_version === "clarification_v1") {
+      const clarificationPayload: AgentResponse = {
+        status: "needs_clarification",
+        actionPlan,
+      };
+      await persistLastDebug(clarificationPayload);
+      return clarificationPayload;
+    }
+
+    const resolvedActionPlan = actionPlan as ActionPlan;
+    resolvedActionPlan.interpreter_mode = interpreterMode;
+    const responsePayload: AgentResponse = {
+      status: "completed",
+      message: "Interpreter-only mode completed. No execution was performed.",
+      actionPlan: resolvedActionPlan,
+    };
+    await persistLastDebug(responsePayload);
+    return responsePayload;
+  } catch (err) {
+    if (err instanceof AuthenticationError) {
+      return { status: "error", error: err.message };
+    }
+    throw err;
+  }
+}
