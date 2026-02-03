@@ -342,15 +342,43 @@ function collectBackendIdsFromDiff(axDiff: AxDiff | null | undefined): Set<numbe
   return ids;
 }
 
-function buildElementsByBackendId(axTree: AxTree | null | undefined): Map<number, { name?: string }> {
+function buildElementsByBackendId(
+  axTree: AxTree | null | undefined
+): Map<number, { name?: string; value?: string }> {
   const elements = Array.isArray(axTree?.elements) ? axTree.elements : [];
-  const map = new Map<number, { name?: string }>();
+  const map = new Map<number, { name?: string; value?: string }>();
   elements.forEach((el) => {
     if (typeof el?.backend_node_id === "number") {
-      map.set(el.backend_node_id, { name: el.name });
+      map.set(el.backend_node_id, { name: el.name, value: el.value });
     }
   });
   return map;
+}
+
+function normalizeInputValue(value: unknown): string {
+  return String(value ?? "").trim().replace(/\s+/g, " ");
+}
+
+function isRedundantInputStep(
+  step: ExecutionStep,
+  elementsByBackendId: Map<number, { name?: string; value?: string }>
+): boolean {
+  if (!step || step.action_type !== "input") {
+    return false;
+  }
+  if (step.backend_node_id == null || step.value == null) {
+    return false;
+  }
+  const el = elementsByBackendId.get(step.backend_node_id);
+  if (!el?.value) {
+    return false;
+  }
+  const stepValue = normalizeInputValue(step.value);
+  if (!stepValue) {
+    return false;
+  }
+  const elValue = normalizeInputValue(el.value);
+  return elValue === stepValue;
 }
 
 function isLikelyConfirmAction(
@@ -574,6 +602,12 @@ async function runDemoFlowInternalAX(
           filtered = filtered.filter(
             (step) =>
               !(step.action_type === "click" && step.backend_node_id === planTriggerNodeId)
+          );
+        }
+        const hasNonInputStep = filtered.some((step) => step.action_type !== "input");
+        if (hasNonInputStep) {
+          filtered = filtered.filter(
+            (step) => !isRedundantInputStep(step, elementsByBackendId)
           );
         }
         if (filtered.length === 0) {
