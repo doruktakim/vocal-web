@@ -58,3 +58,6 @@ chrome_debug.log
 
 # Local test run notes
 LOCAL_PLAYWRIGHT_CLI_TEST.md
+
+# Generated test artifacts
+test-results/
