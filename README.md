@@ -54,8 +54,8 @@ https://github.com/user-attachments/assets/9547ac53-cfc9-48c1-a562-64a99e7f29d1
 - This tool automates multi-step browser actions and may interact with logged-in accounts, modify data, or take unintended actions. Prompt injection or malicious web content may influence its behavior. Using a sandboxed environment for safety is recommended. **Use at your own discretion.**
 
 ## Next steps
-- Currently creating my own dataset to further improve the element selection algorithms and create challenging tests. The use of language models in the navigator component will likely be reintroduced using a process-of-elimination approach once the selection algorithms are good enough to make it worth the additional cost/compute.
 - Will make <3B local open-source models available for increased privacy and free operation.
+- WebMCP is a great step for agent native browsing! I will pilot experimental WebMCP support by adding an optional “WebMCP-first” execution mode in the extension, with automatic fallback to the current AX/CDP pipeline when WebMCP is unavailable.
 
 ## Accessibility Goals
 - We started building this project in a hackathon with the idea that LLMs could help make the web more accesible, particularly for individuals who face challenges using traditional input devices like keyboards and mice. There is a really long way to go before this can be considered a true accessibility tool as there is still large performance improvements needed, but I'm very excited to keep building. If you have ideas or feedback, I’d love to hear from you.
